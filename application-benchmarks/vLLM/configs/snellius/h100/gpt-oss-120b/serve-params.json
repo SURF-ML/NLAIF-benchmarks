@@ -1,0 +1,152 @@
+[
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 512
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 512
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "openai/gpt-oss-120b",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 512
+  }
+]

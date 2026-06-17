@@ -1,0 +1,175 @@
+#!/bin/bash
+#SBATCH -J dinov3_vitl_im1k_eval_all
+#SBATCH -p gpu_h100
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=16
+#SBATCH -t 24:00:00
+#SBATCH -o logs/dinov3_eval_knn_all_%j.out
+#SBATCH -e logs/dinov3_eval_knn_all_%j.err
+
+set -euo pipefail
+
+
+DINOV3_DIR="${SLURM_SUBMIT_DIR}"
+source ${DINOV3_DIR}/dino_venv/bin/activate
+
+cd ${DINOV3_DIR}
+mkdir -p logs
+
+# Change these
+OUTPUT_DIR=${OUTPUT_DIR:-/scratch-shared/larsve/dinov3_vit7b16_pretrain_23150582}
+ROOT_PATH="${ROOT_PATH:-/scratch-nvme/ml-datasets/imagenet/torchvision_ImageFolder}"
+EXTRA_PATH="${EXTRA_PATH:-/home/larsve/MLPerfTraining/data/imagenet1k/extra}"
+
+# Check if directories exist
+if [ ! -d "${ROOT_PATH}" ]; then
+    echo "ERROR: Dataset root directory not found: ${ROOT_PATH}"
+    exit 1
+fi
+echo "Dataset root: ${ROOT_PATH}"
+
+if [ ! -d "${EXTRA_PATH}" ]; then
+    echo "ERROR: Dataset extra directory not found: ${EXTRA_PATH}"
+    exit 1
+fi
+echo "Dataset extra: ${EXTRA_PATH}"
+
+if [ ! -d "${OUTPUT_DIR}" ]; then
+    echo "ERROR: Output directory not found: ${OUTPUT_DIR}"
+    exit 1
+fi
+echo "Output directory: ${OUTPUT_DIR}"
+
+LOG_FILE="${OUTPUT_DIR}/logs/log.txt"
+# check if log file exists, if not raise error and exit
+if [ ! -f "${LOG_FILE}" ]; then
+    echo "ERROR: Log file not found: ${LOG_FILE}"
+    exit 1
+fi
+
+echo "log file: ${LOG_FILE}"
+
+# Optional: Set START_EVAL to begin from a specific checkpoint instead of the first one
+START_EVAL=${START_EVAL:-0}
+echo "Starting from checkpoint: ${START_EVAL}"
+
+# Set TARGET_TOP5 to stop evaluation when this accuracy is reached
+TARGET_TOP5=36.0
+echo "Target Top-5 accuracy: ${TARGET_TOP5}%"
+
+# OMP threads = cpus-per-task; one thread per core
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export PYTHONPATH=${PWD}/dinov3_src:${PWD}/dinov3_src:${PWD}
+# export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-eno2np0}"
+export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-eno2np0}"
+
+CONFIG_FILE="${OUTPUT_DIR}/config.yaml"
+echo "Config file: ${CONFIG_FILE}"
+cat "${CONFIG_FILE}"
+
+echo "========================================"
+echo "Finding all evaluation checkpoints..."
+echo "========================================"
+
+# Find all training_* directories and extract the iteration numbers
+EVAL_DIR="${OUTPUT_DIR}/eval"
+if [ ! -d "${EVAL_DIR}" ]; then
+    echo "ERROR: Evaluation directory not found: ${EVAL_DIR}"
+    exit 1
+fi
+
+# Get all checkpoint iterations, sort numerically
+CHECKPOINTS=$(find "${EVAL_DIR}" -maxdepth 1 -type d -name "training_*" | \
+    sed 's/.*training_//' | \
+    sort -n | \
+    awk -v start="${START_EVAL}" '$1 >= start')
+
+if [ -z "${CHECKPOINTS}" ]; then
+    echo "ERROR: No checkpoints found in ${EVAL_DIR}"
+    exit 1
+fi
+
+CHECKPOINT_COUNT=$(echo "${CHECKPOINTS}" | wc -l)
+echo "Found ${CHECKPOINT_COUNT} checkpoint(s) to evaluate"
+echo "${CHECKPOINTS}"
+echo "========================================"
+echo ""
+
+CURRENT=1
+for EVAL in ${CHECKPOINTS}; do
+    echo "========================================"
+    echo "Evaluating checkpoint ${CURRENT}/${CHECKPOINT_COUNT}: ${EVAL}"
+    echo "========================================"
+    
+    CHECKPOINT_PATH="${OUTPUT_DIR}/eval/training_${EVAL}/sharded_teacher_checkpoint"
+
+    
+    if [ ! -d "${CHECKPOINT_PATH}" ]; then
+        echo "WARNING: Checkpoint path not found: ${CHECKPOINT_PATH}"
+        echo "Skipping..."
+        CURRENT=$((CURRENT + 1))
+        continue
+    fi
+    
+    RESULTS_DIR="${OUTPUT_DIR}/eval/training_${EVAL}"
+    RESULTS_FILE="${RESULTS_DIR}/results_eval_knn.json"
+    
+    # Only perform evaluation if results file doesn't exist
+    if [ ! -f "${RESULTS_FILE}" ]; then
+        echo "Running evaluation for checkpoint ${EVAL}..."
+        
+        srun \
+            --ntasks-per-node=${SLURM_NTASKS_PER_NODE} \
+            python dinov3_src/dinov3/eval/knn.py \
+            model.config_file="${CONFIG_FILE}" \
+            output_dir="${RESULTS_DIR}" \
+            model.pretrained_weights="${CHECKPOINT_PATH}" \
+            "train.dataset=ImageNet:split=TRAIN:root=${ROOT_PATH}:extra=${EXTRA_PATH}" \
+            "eval.test_dataset=ImageNet:split=VAL:root=${ROOT_PATH}:extra=${EXTRA_PATH}" 
+        
+        echo "Completed evaluating checkpoint ${EVAL}"
+    else
+        echo "Results file already exists for checkpoint ${EVAL}, skipping evaluation"
+    fi
+    
+    # Check if we've reached the target accuracy
+    
+    if [ -f "${RESULTS_FILE}" ]; then
+        # Extract all "Top 5" values and find the maximum
+        BEST_TOP5=$(grep "Top 5" "${RESULTS_FILE}" | grep -oP ':\s*\K[0-9.]+' | sort -nr | head -1)
+        
+        if [ -n "${BEST_TOP5}" ]; then
+            echo "Best Top-5 accuracy: ${BEST_TOP5}%"
+            
+            # Check if best Top-5 is >= target threshold
+            if (( $(echo "${BEST_TOP5} >= ${TARGET_TOP5}" | bc -l) )); then
+                echo "========================================"
+                echo "Target accuracy reached! (Top-5: ${BEST_TOP5}% >= ${TARGET_TOP5}%)"
+                echo "Checkpoint iteration: ${EVAL}"
+                echo "========================================"
+                echo ""
+                
+                # Extract training time to target using separate script
+                "${DINOV3_DIR}/extract_time.sh" "${OUTPUT_DIR}" "${EVAL}" "${BEST_TOP5}"
+                
+                echo ""
+                echo "Stopping further evaluations."
+                break
+            fi
+        else
+            echo "WARNING: Could not parse Top-5 results from ${RESULTS_FILE}"
+        fi
+    else
+        echo "WARNING: Results file not found: ${RESULTS_FILE}"
+    fi
+    
+    echo ""
+    CURRENT=$((CURRENT + 1))
+done
+
+echo "========================================"
+echo "All evaluations completed!"
+echo "========================================"

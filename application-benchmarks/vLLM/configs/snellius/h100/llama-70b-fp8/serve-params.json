@@ -1,0 +1,152 @@
+[
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 1,
+    "max_num_seqs": 512
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 2,
+    "max_num_seqs": 512
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 1
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 2
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 4
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 8
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 16
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 32
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 64
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 128
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 256
+  },
+  {
+    "model": "nvidia/Llama-3.3-70B-Instruct-FP8",
+    "tensor-parallel-size": 4,
+    "max_num_seqs": 512
+  }
+]
