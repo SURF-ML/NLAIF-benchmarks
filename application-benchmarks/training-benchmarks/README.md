@@ -34,23 +34,22 @@ Pre-training benchmark suite for the NLAIF procurement. This suite contains thre
 │   ├─ RULES_AND_SCORING.md
 │   └─ README.md
 │
-├─ MLPerf/                       # MLPerf benchmarks
-│   ├─ GPT-OSS-20B/             # GPT‑OSS‑20B benchmark
-│   │   └─ primus/              # Primus framework
-│   │       ├─ src/             # Source code
-│   │       ├─ conf/            # Configuration files
-│   │       ├─ patches/         # Framework patches
-│   │       ├─ config_*.sh      # System‑specific configs
-│   │       ├─ launch_apptainer.sh
-│   │       ├─ run_and_time.sh
-│   │       ├─ requirements.txt
-│   │       ├─ RULES_AND_SCORING.md
-│   │       └─ README.md
-│   │
-│   └─ DeepseekV3/              # DeepseekV3 671B benchmark
-│       ├─ nemo/                # Reference implementation
+├─ GPT-OSS-20B/             # GPT‑OSS‑20B benchmark
+│   └─ primus/              # Primus framework
+│       ├─ src/             # Source code
+│       ├─ conf/            # Configuration files
+│       ├─ patches/         # Framework patches
+│       ├─ config_*.sh      # System‑specific configs
+│       ├─ launch_apptainer.sh
+│       ├─ run_and_time.sh
+│       ├─ requirements.txt
 │       ├─ RULES_AND_SCORING.md
 │       └─ README.md
+│
+└─ DeepseekV3/              # DeepseekV3 671B benchmark
+│    ├─ nemo/                # Reference implementation
+│    ├─ RULES_AND_SCORING.md
+│    └─ README.md
 │
 └─ README.md                     # this file
 ```
