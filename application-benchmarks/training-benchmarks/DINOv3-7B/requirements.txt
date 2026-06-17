@@ -1,0 +1,12 @@
+# DINOv3-7B Requirements
+# Install with: pip install -r requirements.txt
+#
+# This will install DINOv3's dependencies (not the package itself)
+#
+# System requirements (install via apt/yum/etc):
+#   - bc (for timing calculations in extract_time.sh)
+
+# Install dependencies from dinov3_src requirements
+# (torch, torchvision, omegaconf, ftfy, regex, scikit-learn, submitit, termcolor, torchmetrics)
+-r ./dinov3_src/requirements.txt
+pandas # required for evaluation scripts, not listed in dinov3_src/requirements.txt

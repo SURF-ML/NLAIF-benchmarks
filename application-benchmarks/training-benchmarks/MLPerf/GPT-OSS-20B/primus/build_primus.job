@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH -J build_primus_container
+#SBATCH -p cbuild
+#SBATCH --exclusive
+#SBATCH -N 1
+#SBATCH -t 10:00:00
+#SBATCH -o log/build_%j.out
+#SBATCH -e log/build_%j.err
+
+module purge
+
+# go to repo with Dockerfile + primus.def + patch etc
+cd /projects/hpmlprjs/MLPerfTraining/training-benchmarks/MLPerf/GPT-OSS-20B/primus
+
+echo "Starting container build..."
+date
+
+export APPTAINER_CACHEDIR=/scratch-shared/$USER/apptainer_cache
+mkdir -p $APPTAINER_CACHEDIR
+
+export APPTAINER_TMPDIR=/dev/shm/$USER/apptainer_tmp
+mkdir -p $APPTAINER_TMPDIR
+
+
+DEF_FILE=${DEF_FILE:-gpt-oss-20b-primus.def}
+SIF_FILE=${SIF_FILE:-primus.sif}
+
+apptainer build --fakeroot "$SIF_FILE" "$DEF_FILE"
+
+echo "Build finished"
+date
