@@ -1,0 +1,81 @@
+#!/bin/bash
+
+#SBATCH --exclusive
+#SBATCH --mem=0
+
+set -eux
+
+# Vars without defaults
+: "${CODEDIR:?CODEDIR not set}"
+: "${DATADIR:?DATADIR not set}"
+: "${MODELDIR:?MODELDIR not set}"
+: "${SIF:?SIF not set}"
+: "${CONFIG:?CONFIG not set}"
+: "${WALLTIME:?WALLTIME not set}"
+
+# Vars with defaults
+: "${NEXP:=1}"
+: "${SEED_BASE:=${SEED-$RANDOM}}"
+: "${DATESTAMP:=$(date +'%y%m%d%H%M%S%N')}"
+: "${LOGDIR:=./results}"
+: "${GPUS_PER_NODE:=4}"
+
+export MASTER_PORT="${MASTER_PORT:-29500}"
+export MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST-}" | head -n1)"
+echo "using MASTER_ADDR \"${MASTER_ADDR}\" of list \"${SLURM_JOB_NODELIST}\""
+
+readonly _logfile_base="${LOGDIR}/${DATESTAMP}"
+
+# Setup directories
+( umask 0002; mkdir -p "${LOGDIR}" )
+srun --ntasks-per-node=1 mkdir -p "${LOGDIR}"
+
+# Prepare bind mounts for Apptainer
+# CODEDIR is passed from launch_apptainer.sh as an environment variable
+APPTAINER_BIND="${DATADIR}:/data,${LOGDIR}:/results,${MODELDIR}:/model,${CODEDIR}:/workspace/code"
+
+# Export environment variables that will be passed to the container
+export APPTAINER_BIND
+export NNODES="${SLURM_JOB_NUM_NODES}"
+export GPUS_PER_NODE
+unset LD_PRELOAD
+for _experiment_index in $(seq 1 "${NEXP}"); do
+    (
+        # Set experiment-specific seed
+        export SEED=$(($SEED_BASE - 1 + 10#$_experiment_index))
+        
+        echo "========================================"
+        echo "Experiment ${_experiment_index}/${NEXP}"
+        echo "SEED: ${SEED}"
+        echo "Config: ${CONFIG}"
+        echo "Nodes: ${NNODES}"
+        echo "GPUs per node: ${GPUS_PER_NODE}"
+        echo "========================================"
+
+        # Run training with Apptainer
+        # Each task runs on a different node with the container
+        # SLURM environment variables are automatically set by srun for each task
+        export APPTAINER_BIND
+        
+        srun -l --mpi="${SLURM_MPI_TYPE:-pmix}" \
+             --ntasks="${NNODES}" \
+             --ntasks-per-node=1 \
+             --gpus-per-task="${GPUS_PER_NODE}" \
+             --cpus-per-task=64 \
+             --cpu-bind=none \
+             bash -c "apptainer exec --nv \
+             --no-home \
+             --env HOME=/tmp \
+             --env PYTHONNOUSERSITE=1 \
+             --env MASTER_ADDR=${MASTER_ADDR} \
+             --env MASTER_PORT=${MASTER_PORT} \
+             --env SEED=${SEED} \
+             --env GPUS_PER_NODE=${GPUS_PER_NODE} \
+             --pwd /workspace/code \
+             ${SIF} \
+             /workspace/code/run_apptainer_wrapper.sh ${CONFIG}"
+
+    ) |& tee "${_logfile_base}_${_experiment_index}.log"
+done
+
+echo "All experiments completed"

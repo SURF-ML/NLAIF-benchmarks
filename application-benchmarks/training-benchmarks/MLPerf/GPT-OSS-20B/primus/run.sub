@@ -1,0 +1,55 @@
+#!/bin/bash
+
+#SBATCH --exclusive
+#SBATCH --mem=0
+
+set -eux
+
+# Vars without defaults
+: "${DATADIR:?DATADIR not set}"
+: "${MODELDIR:?MODELDIR not set}"
+: "${CONT:?CONT not set}"
+: "${WALLTIME:?WALLTIME not set}"
+
+# Vars with defaults
+: "${NEXP:=1}"
+: "${SEED_BASE:=${SEED-$RANDOM}}"
+: "${DATESTAMP:=$(date +'%y%m%d%H%M%S%N')}"
+: "${LOGDIR:=./results}"
+
+PYXIS_DEFAULTS=( '--no-container-mount-home' '--container-remap-root' '--container-writable' )
+: "${MASTER_PORT:=29500}"
+export MASTER_PORT
+export MASTER_ADDR="$(scontrol show hostnames "${SLURM_JOB_NODELIST-}" | head -n1)"
+echo "using MASTER_ADDR \"${MASTER_ADDR}\" of list \"${SLURM_JOB_NODELIST}\""
+
+readonly _cont_name="gpt_oss_20b_${SLURM_JOB_ID}"
+readonly _logfile_base="${LOGDIR}/${DATESTAMP}"
+_cont_mounts="${DATADIR}:/data,${LOGDIR}:/results,${MODELDIR}:/model"
+
+cleanup_pyxis() {
+    srun --ntasks-per-node=1 /bin/bash -c 'if [[ "$(enroot list)" ]]; then enroot remove -f $(enroot list); fi'
+}
+trap cleanup_pyxis TERM EXIT
+cleanup_pyxis
+
+# Setup directories
+( umask 0002; mkdir -p "${LOGDIR}" )
+srun --ntasks-per-node=1 mkdir -p "${LOGDIR}"
+
+# Setup container
+srun --ntasks-per-node=1 --container-image="${CONT}" --container-name="${_cont_name}" "${PYXIS_DEFAULTS[@]}" true
+
+for _experiment_index in $(seq 1 "${NEXP}"); do
+    (
+        # Run experiment
+        export SEED=$(($SEED_BASE - 1 + 10#$_experiment_index))
+        srun -l --mpi="${SLURM_MPI_TYPE:-pmix}" \
+             --ntasks-per-node=${GPUS_PER_NODE} \
+             --container-name="${_cont_name}" "${PYXIS_DEFAULTS[@]}" \
+             --container-mounts="${_cont_mounts}" \
+             --container-env=MASTER_PORT,MASTER_ADDR \
+             slurm2pytorch ./run_and_time.sh
+
+    ) |& tee "${_logfile_base}_${_experiment_index}.log"
+done
