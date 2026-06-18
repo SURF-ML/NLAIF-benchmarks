@@ -3,10 +3,11 @@
 ## Introduction
 
 The General Matrix Matrix Multiplication benchmark is very standard especially because it is the core hardware based
-operation that a GPU is designed for, particulary for AI applications. The core operation performed during these
+operation that a GPU is designed for, particularly for AI applications. The core operation performed during these
 computations is mathematically defined below:
 
-$$ D = \alpha \times A \times B + \beta \times C $$
+<!-- prettier-ignore -->
+$$ D = \alpha A_{ij}B_{jk} + \beta C $$
 
 ## Rules
 
