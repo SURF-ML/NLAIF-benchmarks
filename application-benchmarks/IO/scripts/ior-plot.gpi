@@ -1,0 +1,68 @@
+# Plot IOR bandwidth and IOPS results for single/weak/strong scaling
+#
+# Usage: gnuplot -e "case_dir='path/to/case'" scripts/ior-plot.gpi
+#        gnuplot -e "case_dir='path/to/case'; term='png'" scripts/ior-plot.gpi
+#
+# Optional: term = 'eps' | 'png' | 'dumb' (default: dumb = ASCII)
+#
+# Column layout (ior-<mode>.dat):
+#   1  ntasks       2  nodes        3  ppn
+#   4  write_MiB_s  5  read_MiB_s
+#   6  write_IOPS   7  read_IOPS
+#   8  write_lat_s  9  read_lat_s
+#   10 w_open_s    11 w_wrrd_s    12 w_close_s
+#   13 r_open_s    14 r_rdrd_s    15 r_close_s
+#   16 elapsed_s
+#   17 fs_size_TiB 18 fs_used_pct 19 inode_used_pct
+
+if (!exists("case_dir")) {
+    print "Usage: gnuplot -e \"case_dir='results/ior/...'\" scripts/ior-plot.gpi"
+    exit
+}
+
+if (!exists("term")) { term = "dumb" }
+
+case_file = case_dir . "/ior.md"
+
+scaling_mode  = system("grep '^scaling_mode' "  . case_file . " | awk -F' = ' '{print $2}'")
+transfer_size = system("grep '^transfer_size' " . case_file . " | awk -F' = ' '{print $2}'")
+cluster       = system("grep '^cluster' "       . case_file . " | awk -F' = ' '{print $2}'")
+filesystem    = system("grep '^filesystem' "    . case_file . " | awk -F' = ' '{print $2}'")
+
+dat = case_dir . "/ior-" . scaling_mode . ".dat"
+
+set datafile missing "NA"
+
+if (term eq "eps") {
+    set terminal postscript eps enhanced color font "Sans,11" size 6.5,8.5
+    set output case_dir . "/ior-" . scaling_mode . ".eps"
+} else if (term eq "png") {
+    set terminal pngcairo size 900,900 enhanced font "Sans,11"
+    set output case_dir . "/ior-" . scaling_mode . ".png"
+} else {
+    set terminal dumb size 120,60
+}
+
+set multiplot layout 2,1 \
+    title sprintf("IOR %s Scaling — %s / %s  (xfer=%s)", \
+                  scaling_mode, cluster, filesystem, transfer_size) \
+    font ",13"
+
+# --- Panel 1: Bandwidth (MiB/s) ---
+set xlabel "Number of tasks"
+set ylabel "Bandwidth (MiB/s)"
+set key top left
+set grid
+set logscale x 2
+unset logscale y
+
+plot dat using 1:4 with linespoints lw 2 pt 7 title "Write", \
+     dat using 1:5 with linespoints lw 2 pt 5 title "Read"
+
+# --- Panel 2: IOPS ---
+set ylabel "IOPS"
+
+plot dat using 1:6 with linespoints lw 2 pt 7 title "Write IOPS", \
+     dat using 1:7 with linespoints lw 2 pt 5 title "Read IOPS"
+
+unset multiplot
