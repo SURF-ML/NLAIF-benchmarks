@@ -1,0 +1,80 @@
+# Plot MDTEST metadata operation rates for single/weak/strong scaling
+#
+# Usage: gnuplot -e "case_dir='path/to/case'" scripts/mdtest-plot.gpi
+#        gnuplot -e "case_dir='path/to/case'; term='png'" scripts/mdtest-plot.gpi
+#
+# Optional: term = 'eps' | 'png' | 'dumb' (default: dumb = ASCII)
+#
+# Column layout (mdtest-<mode>.dat):
+#   1  ntasks        2  nodes         3  ppn
+#   4  items_per_task  5  total_items  6  total_files  7  avg_file_size
+#   8  dir_create    9  dir_stat     10  dir_rename   11  dir_remove
+#   12 file_create  13  file_stat    14  file_read    15  file_remove
+#   16 tree_create  17  tree_remove
+#   18 elapsed_s
+#
+# Ops/sec values are normalized to the first-row total_items so that weak and
+# strong scaling sweeps are comparable on the same axes (efficiency metric).
+# For strong/single scaling, total_items is constant so normalization = 1.
+
+if (!exists("case_dir")) {
+    print "Usage: gnuplot -e \"case_dir='results/mdtest/...'\" scripts/mdtest-plot.gpi"
+    exit
+}
+
+if (!exists("term")) { term = "dumb" }
+
+case_file = case_dir . "/mdtest.md"
+
+scaling_mode  = system("grep '^scaling_mode' "  . case_file . " | awk -F' = ' '{print $2}'")
+cluster       = system("grep '^cluster' "       . case_file . " | awk -F' = ' '{print $2}'")
+filesystem    = system("grep '^filesystem' "    . case_file . " | awk -F' = ' '{print $2}'")
+avg_file_size = system("grep '^avg_file_size' " . case_file . " | awk -F' = ' '{print $2}'")
+
+dat = case_dir . "/mdtest-" . scaling_mode . ".dat"
+
+# Grab total_items from the first data row for normalization
+stats dat using 5 every ::1::1 nooutput
+base_items = STATS_mean
+if (base_items <= 0) { base_items = 1 }
+
+if (term eq "eps") {
+    set terminal postscript eps enhanced color font "Sans,11" size 6.5,8.5
+    set output case_dir . "/mdtest-" . scaling_mode . ".eps"
+} else if (term eq "png") {
+    set terminal pngcairo size 900,900 enhanced font "Sans,11"
+    set output case_dir . "/mdtest-" . scaling_mode . ".png"
+} else {
+    set terminal dumb size 120,60
+}
+
+set multiplot layout 2,1 \
+    title sprintf("MDTEST %s Scaling — %s / %s", scaling_mode, cluster, filesystem) \
+    font ",13"
+
+set xlabel "Number of tasks"
+set ylabel "Ops/sec (normalized)"
+set key top left
+set grid
+set logscale x 2
+unset logscale y
+
+# Normalization: scale ops/sec by base_items/total_items so that weak and strong
+# scaling sweeps are comparable. For strong/single, total_items is constant → factor=1.
+N = base_items
+
+# --- Panel 1: Directory and tree operations ---
+plot dat using 1:($8  * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 7  title "Dir create",  \
+     dat using 1:($9  * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 5  title "Dir stat",    \
+     dat using 1:($10 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 9  title "Dir rename",  \
+     dat using 1:($11 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 4  title "Dir remove",  \
+     dat using 1:($16 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 12 title "Tree create", \
+     dat using 1:($17 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 13 title "Tree remove"
+
+# --- Panel 2: File operations ---
+plot dat using 1:($12 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 7  title "File create", \
+     dat using 1:($13 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 5  title "File stat",   \
+     dat using 1:($14 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 9  title "File read",   \
+     dat using 1:($15 * N / ($5 > 0 ? $5 : 1)) with linespoints lw 2 pt 4  title "File remove"
+
+unset multiplot
