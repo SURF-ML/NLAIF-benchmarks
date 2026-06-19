@@ -102,15 +102,6 @@ pipeline-, and expert-parallelism ([§8.4](#84-parallelism)), sized to the model
 single node where enough high-bandwidth GPUs are available, otherwise across nodes (the Snellius
 H100 reference serves it as **TP4 × PP4 across four 4-GPU nodes** via Ray).
 
-Accelerators with native FP4 matrix units execute the FP4 MoE at full rate; those without load
-the FP4 weights at reduced memory cost but execute them at roughly FP8-class throughput (a
-fallback kernel such as Marlin) and typically need more GPUs to hold the model. This asymmetry is
-intended — the benchmark rewards native FP4 capability.
-
-Because FP4 accuracy varies across vendors, any vendor-specific FP4 build must pass an
-**accuracy gate before its throughput is accepted**: run lm-eval (MMLU + GSM8K) and confirm the
-build is within ±0.5% of the BF16 reference. A build that fails the gate is not scored.
-
 ---
 
 ## 4. Workloads & Datasets
@@ -207,7 +198,7 @@ Output: `containers/vllm-bench_<vendor>_<version>.sif` (or `.tar` for Podman). P
 ```bash
 export HF_HOME=/path/to/shared/model-cache   # must be readable on every compute node
 
-huggingface-cli download nvidia/Llama-3.3-70B-Instruct-FP8
+huggingface-cli download nvidia/Llama-3.3-70B-Instruct-FP8  # or https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV
 huggingface-cli download openai/gpt-oss-120b
 huggingface-cli download deepseek-ai/DeepSeek-V4-Pro
 ```
@@ -438,7 +429,7 @@ being evaluated alongside the hardware.
 | KV-cache memory layout (`--block-size`) | Block size and cache layout. | Memory layout only. |
 | Collective / all-to-all backend (MoE) | The platform's native collective-communication kernels. | Kernel/transport selection — same class as `--moe-backend` / `-cc.mode`. |
 | `--gpu-memory-utilization` | Fraction of VRAM vLLM may use. | Different GPU memory sizes warrant different values to maximise KV cache without OOM. |
-| **System / operational environment** | Settings required for correct operation: network-interface selection (e.g. `NCCL_SOCKET_IFNAME`), interconnect env, container-runtime flags, cache locations, engine/ready timeouts. | The software side of the ecosystem; affects operability and speed, not the result. |
+| **System / operational environment** | Settings required for correct operation: network-interface selection (e.g. `NCCL_SOCKET_IFNAME`), interconnect env, container-runtime flags, engine/ready timeouts. | Tuning software side of the ecosystem for correct performance on the target system. |
 
 > The Snellius H100 reference sets `-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY` for
 > DeepSeek-V4-Pro (its default compilation does not serve on the TP4×PP4 layout). This is a
@@ -480,18 +471,16 @@ altering the computation or workload shape is prohibited.
 
 1. **Lower-precision weights for a fixed-precision model** — prohibited (precision is fixed to
    prevent undetectable quality loss).
-2. **`amd/gpt-oss-120b-w-mxfp4-a-fp8`** — prohibited; FP8-activation quantisation makes it a
-   different numerical model from the required `openai/gpt-oss-120b`.
-3. **Prefix caching on the random-token datasets** — prohibited regardless of shared prefixes;
+2. **Prefix caching on the random-token datasets** — prohibited regardless of shared prefixes;
    the parameter is fixed off.
-4. **Truncating output to inflate throughput** — impossible; `--ignore-eos` forces generation to
+3. **Truncating output to inflate throughput** — impossible; `--ignore-eos` forces generation to
    `custom-output-len`.
-5. **Speculative decoding** — prohibited; see [§8.5](#85-prohibited).
-6. **Installing extra packages or custom kernels** — prohibited; only what ships in the official
+4. **Speculative decoding** — prohibited; see [§8.5](#85-prohibited).
+5. **Installing extra packages or custom kernels** — prohibited; only what ships in the official
    image at the pinned version may be used.
-7. **Optimising for a single concurrency value** — the score is the area under the whole frontier;
+6. **Optimising for a single concurrency value** — the score is the area under the whole frontier;
    one point cannot disproportionately inflate the AUC.
-8. **A different vLLM version than the pinned one** — invalid; all submissions use the same version.
+7. **A different vLLM version than the pinned one** — invalid; all submissions use the same version.
 
 Configurations not addressed here are **prohibited by default**. Contact the organisers before
 proceeding with anything not explicitly sanctioned.
