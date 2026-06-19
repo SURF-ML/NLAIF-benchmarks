@@ -87,7 +87,7 @@ support:
   `nvidia/Llama-3.3-70B-Instruct-FP8` and `amd/Llama-3.3-70B-Instruct-FP8-KV` (its FP8 KV-cache
   scales are immaterial — the harness fixes `--kv-cache-dtype fp8` everywhere).
 - **GPT-OSS-120B → MXFP4 native.** The released weights are stored in MXFP4; use the base
-  `openai/gpt-oss-120b` checkpoint. The `amd/gpt-oss-120b-w-mxfp4-a-fp8` variant (adds FP8
+  `openai/gpt-oss-120b` checkpoint. Any other checkpoint such as the `amd/gpt-oss-120b-w-mxfp4-a-fp8` variant (adds FP4
   activation quantisation) is prohibited — see [§9](#9-edge-case-rulings).
 - **DeepSeek V4 Pro → FP4+FP8 mixed native.** Trained with MoE expert weights in FP4 and
   attention/router/normalisation weights in FP8. FP4 encodings differ across vendors (block-16
@@ -347,11 +347,11 @@ well. This is implemented in [`src/utils/plot_pareto.py`](src/utils/plot_pareto.
 Each curve is one workload shape; markers are the swept concurrency points (`{1…512}` here) and the
 staircase is the Pareto frontier whose area is the AUC. The corresponding `scores.csv` rows:
 
-| model | input_len | output_len | auc | n_points |
-|-------|:---------:|:----------:|----:|:--------:|
-| openai/gpt-oss-120b | 8192 | 1024 | 7,504,158 | 10 |
-| openai/gpt-oss-120b | 4608 | 4608 | 814,069 | 10 |
-| openai/gpt-oss-120b | 1024 | 8192 | 327,291 | 10 |
+| model | input_len | output_len | auc |
+|-------|:---------:|:----------:|----:|
+| openai/gpt-oss-120b | 8192 | 1024 | 7,504,158 |
+| openai/gpt-oss-120b | 4608 | 4608 | 814,069 |
+| openai/gpt-oss-120b | 1024 | 8192 | 327,291 |
 
 ### Step 2 — Normalisation across submissions
 
