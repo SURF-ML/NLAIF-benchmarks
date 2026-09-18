@@ -11,12 +11,12 @@ Two modes
 ---------
 Orchestrator (default):
     Reads serve/bench params, applies link-vars pairing, then submits one
-    `sbatch` job per serve config (each as a worker). Polls squeue for status.
+    `sbatch` job per (serve, bench) pair (each as a worker). Polls squeue for status.
 
 Worker (--worker flag, launched by sbatch):
-    Starts one `vllm serve`, runs all its matched bench configs sequentially,
-    merges serve+bench params into each result record, writes summary.json,
-    then stops the server.
+    Starts one `vllm serve`, runs its bench config against it, merges serve+bench
+    params into the result record, writes summary.json, then stops the server.
+    The server's own stdout/stderr is captured to serve.log next to the results.
 
 Usage
 -----
@@ -25,7 +25,7 @@ Usage
         --bench-params sweep_configs/bench-params-small.json \\
         --serve-cmd  "vllm serve --kv-cache-dtype auto ..." \\
         --bench-cmd  "vllm bench serve --backend vllm ..." \\
-        --link-vars  max_num_seqs=max_concurrency,model=model \\
+        --link-vars  model=model,max_num_seqs=_n \\
         --results-dir results/20250227_120000 \\
         --sbatch-args "-p gpu_h100 --account=myaccount"
 """
@@ -392,14 +392,27 @@ def run_worker(args):
         serve_cmd_str += " --distributed-executor-backend ray"
         serve_env = serve_env | {"RAY_ADDRESS": ray_ctx.gcs_address}
 
+    # Capture the engine's own stdout/stderr next to the results instead of letting it
+    # inherit into the SLURM log. serve.log holds vLLM's startup report, including
+    #   "Maximum concurrency for <max-model-len> tokens per request: X.XXx"
+    # which is how a vendor picks max_num_seqs (N) and how organisers audit that a declared
+    # N is consistent with the KV cache the engine actually allocated. The worker's own
+    # prints still go to the SLURM log, so progress remains visible there.
+    serve_log = results_dir / combo_subdir(serve_config, bench_configs[0]) / "serve.log"
+    serve_log.parent.mkdir(parents=True, exist_ok=True)
+
     print(f"[worker port={port}] Starting server ...", flush=True)
     print(f"[worker port={port}]   {serve_cmd_str}", flush=True)
+    print(f"[worker port={port}]   server log → {serve_log}", flush=True)
 
-    server = subprocess.Popen(
-        [*cmd_prefix, *shlex.split(serve_cmd_str)],
-        start_new_session=True,          # own process group for clean kill
-        env=serve_env,
-    )
+    with serve_log.open("wb") as serve_log_fh:
+        server = subprocess.Popen(
+            [*cmd_prefix, *shlex.split(serve_cmd_str)],
+            start_new_session=True,      # own process group for clean kill
+            env=serve_env,
+            stdout=serve_log_fh,
+            stderr=subprocess.STDOUT,
+        )
 
     server_died = False
     try:
@@ -496,8 +509,8 @@ def run_worker(args):
 def _submit_group(i, serve_config, bench_configs, port, n, tmp_root, results_dir, args) -> str:
     """Write config files, submit an sbatch job, return SLURM job ID.
 
-    One worker serves `serve_config` once and runs every bench in `bench_configs`
-    against it — so a serve config's model is loaded a single time, not once per shape.
+    `bench_configs` holds exactly one bench: the orchestrator pairs each serve config with
+    each linked bench separately so every measurement runs against a freshly started engine.
     """
     serve_file = tmp_root / f"serve_{i}.json"
     bench_file = tmp_root / f"bench_{i}.json"
@@ -633,18 +646,23 @@ def run_orchestrator(args):
     bench_params = _load_params(args.config_root, args.bench_params, "bench")
     link_vars = parse_link_vars(args.link_vars)
 
-    # One worker per serve config, carrying every bench that links to it (typically the
-    # 3 workload shapes). This loads each model once per parallelism/concurrency point
-    # instead of once per shape — a big saving for large multi-node models.
+    # One worker per (serve, bench) PAIR — every measurement gets a freshly started engine.
+    # Sharing a server across benches would be cheaper (one model load instead of several),
+    # but back-to-back runs contaminate each other: allocator fragmentation after a
+    # high-concurrency run, lazy CUDA-graph/kernel warm-up that only the first bench pays,
+    # page-cache warmth, and GPU clock/thermal state all differ between the first and last
+    # bench on one engine. Those effects are ordering-dependent and undetectable afterwards,
+    # so the model load is paid per measurement deliberately. It also bounds the blast radius:
+    # a wedged engine costs one cell, not the rest of the run.
     groups: list[tuple[dict, list[dict]]] = [
-        (s, matched)
+        (s, [b])
         for s in serve_params
-        if (matched := [b for b in bench_params if configs_match(s, b, link_vars)])
+        for b in bench_params
+        if configs_match(s, b, link_vars)
     ]
 
-    n_benches = sum(len(b) for _, b in groups)
-    print(f"[orchestrator] {len(groups)} serve configs / {n_benches} benches "
-          f"→ {len(groups)} sbatch workers")
+    print(f"[orchestrator] {len(serve_params)} serve configs / {len(bench_params)} benches "
+          f"→ {len(groups)} sbatch workers (one per measurement)")
 
     results_dir = pathlib.Path(
         args.results_dir or f"results/{datetime.now().strftime('%Y%m%d_%H%M%S')}"

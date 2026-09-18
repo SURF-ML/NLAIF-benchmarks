@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Score a sweep: per-subtask Pareto AUC.
+Score a run: tok/s/GPU at each fixed operating point.
 
-A *subtask* is one (model, workload-shape) pair, where the workload shape is the
-(input-len, output-len) of the dataset. For each subtask we take every swept point
-(all concurrency levels across all parallelism configs), extract the Pareto frontier
-of tok/s/GPU (y) vs tok/s/user (x), and compute its area under the curve (AUC) — the
-headline metric. A higher AUC means better throughput across the whole
-online<->offline operating range, not just at one point.
+A *cell* is one (workload shape, operating point) pair, where the shape is the
+(input-len, output-len) of the dataset and the point is the `_point` label carried by the
+bench config. Nothing here assumes how many points there are, or what they are called: the
+point set is read from the data.
+
+For each cell we report the best tok/s/GPU achieved across every parallelism layout that was
+run. Taking the max *is* the pooling across layouts: a submission may run several layouts and
+each cell is credited with the best result, exactly as the earlier Pareto frontier pooled all
+layouts' points into one curve.
+
+Only raw values are written. The final score requires normalising each cell against the best
+submission on that same cell and then averaging, which can only be done once every submission
+is in — so that step belongs to the organisers, not to this script. The flat one-row-per-cell
+schema is designed to be concatenated across submissions for exactly that purpose.
 
 Outputs:
   * a table printed to the terminal
-  * scores.csv  and  scores.json  written into the results dir
-
-The CSV/JSON schema is one flat row per (model, input_len, output_len), plus per-model
-mean and an overall mean. The flat layout is deliberate: results from several
-submissions can be concatenated and normalised across parties later (README §6) without
-reshaping.
-
-Reuses the metric helpers from plot_pareto.py so the AUC here is identical to the value
-drawn on the Pareto plots.
+  * scores.csv and scores.json written into the results dir
 
 Usage:
     python score.py RESULTS_DIR
@@ -37,13 +37,15 @@ except ImportError as e:  # pragma: no cover
 
 from plot_pareto import (
     THROUGHPUT_KEY,
-    _compute_auc,
+    _first_present,
     _json_load,
-    _pareto_frontier,
     _prepare_records,
 )
 
 _SHAPE_RE = re.compile(r"_i(\d+)_o(\d+)")
+
+# The scored quantity. Everything else in a row is context for auditing the number.
+SCORED_METRIC = "tokens_per_gpu"
 
 
 def _input_len(record: dict) -> int | None:
@@ -75,15 +77,29 @@ def _model(record: dict) -> str:
     return record.get("model") or record.get("model_id") or "?"
 
 
+def _point(record: dict) -> str:
+    """Operating-point label, as tagged by the bench config."""
+    value = _first_present(record, ["_point"])
+    return str(value) if value is not None else "?"
+
+
+def _int_or_none(record: dict, keys: list[str]) -> int | None:
+    value = _first_present(record, keys)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def compute_scores(output_dir: Path) -> list[dict]:
-    """Return one score row per (model, input_len, output_len) subtask."""
+    """Return one row per (model, shape, point), holding the best layout's tok/s/GPU."""
     raw_data = [
         run_data
         for path in output_dir.rglob("**/summary.json")
         for run_data in _json_load(path)
     ]
     if not raw_data:
-        raise ValueError(f"No sweep results found under {output_dir}")
+        raise ValueError(f"No results found under {output_dir}")
 
     prepared, skipped = _prepare_records(
         raw_data, user_count_var="max_concurrency", gpu_count_var=None
@@ -93,83 +109,104 @@ def compute_scores(output_dir: Path) -> list[dict]:
     if not prepared:
         raise ValueError(f"No data points with {THROUGHPUT_KEY} + user count available.")
 
-    # Tag every prepared record with its subtask key.
     for rec in prepared:
         rec["_model"] = _model(rec)
         rec["_input_len"] = _input_len(rec)
         rec["_output_len"] = _output_len(rec)
+        rec["_point_label"] = _point(rec)
 
     df = pd.DataFrame.from_records(prepared)
 
     rows: list[dict] = []
-    for (model, in_len, out_len), group in df.groupby(
-        ["_model", "_input_len", "_output_len"], dropna=False
+    for (model, in_len, out_len, point), group in df.groupby(
+        ["_model", "_input_len", "_output_len", "_point_label"], dropna=False
     ):
-        group = group.dropna(subset=["tokens_per_user", "tokens_per_gpu"])
+        group = group.dropna(subset=[SCORED_METRIC])
         if group.empty:
             continue
-        frontier = _pareto_frontier(group, "tokens_per_user", "tokens_per_gpu")
-        frontier = frontier.sort_values("tokens_per_user")
-        auc = _compute_auc(
-            frontier["tokens_per_user"].tolist(),
-            frontier["tokens_per_gpu"].tolist(),
-        )
+        # Pool across layouts: the best result for this cell wins.
+        best = group.loc[group[SCORED_METRIC].idxmax()].to_dict()
         rows.append({
             "model": model,
             "input_len": None if pd.isna(in_len) else int(in_len),
             "output_len": None if pd.isna(out_len) else int(out_len),
-            "auc": auc,
-            "n_points": int(len(group)),
-            "n_frontier": int(len(frontier)),
+            "point": point,
+            "max_concurrency": _int_or_none(best, ["max_concurrency"]),
+            "tokens_per_gpu": float(best[SCORED_METRIC]),
+            "tokens_per_user": float(best.get("tokens_per_user") or 0.0),
+            "tensor_parallel_size": _int_or_none(best, ["tensor-parallel-size"]),
+            "pipeline_parallel_size": _int_or_none(best, ["pipeline-parallel-size"]),
+            "max_num_seqs": _int_or_none(best, ["max_num_seqs"]),
+            "n_layouts": int(len(group)),
         })
 
-    rows.sort(key=lambda r: (r["model"], r["input_len"] or 0, r["output_len"] or 0))
+    rows.sort(key=lambda r: (r["model"], r["input_len"] or 0, r["output_len"] or 0,
+                             r["max_concurrency"] or 0))
     return rows
 
 
+def _point_order(rows: list[dict]) -> list[str]:
+    """Point labels ordered by the concurrency they ran at, whatever the labels happen to be."""
+    by_label: dict[str, int] = {}
+    for r in rows:
+        c = r["max_concurrency"] or 0
+        by_label[r["point"]] = max(by_label.get(r["point"], 0), c)
+    return sorted(by_label, key=lambda label: (by_label[label], label))
+
+
 def _shape_label(row: dict) -> str:
-    i = row["input_len"]
-    o = row["output_len"]
+    i, o = row["input_len"], row["output_len"]
     return f"{i if i is not None else '?'}->{o if o is not None else '?'}"
 
 
+def _point_means(rows: list[dict]) -> dict[str, float]:
+    means: dict[str, float] = {}
+    for label in _point_order(rows):
+        vals = [r["tokens_per_gpu"] for r in rows if r["point"] == label]
+        if vals:
+            means[label] = sum(vals) / len(vals)
+    return means
+
+
 def print_table(rows: list[dict]) -> None:
-    header = f"{'model':40}  {'shape(in->out)':16}  {'AUC':>14}  {'pts':>5}  {'front':>5}"
+    header = (f"{'model':34}  {'shape(in->out)':16}  {'point':6}  {'conc':>6}  "
+              f"{'tok/s/GPU':>12}  {'tok/s/user':>11}  {'lay':>4}")
     print("\n" + header)
     print("-" * len(header))
-    by_model: dict[str, list[dict]] = {}
     for row in rows:
-        print(f"{row['model']:40.40}  {_shape_label(row):16}  "
-              f"{row['auc']:14.2f}  {row['n_points']:5d}  {row['n_frontier']:5d}")
-        by_model.setdefault(row["model"], []).append(row)
+        print(f"{row['model']:34.34}  {_shape_label(row):16}  {row['point']:6.6}  "
+              f"{row['max_concurrency'] or 0:6d}  {row['tokens_per_gpu']:12.2f}  "
+              f"{row['tokens_per_user']:11.2f}  {row['n_layouts']:4d}")
     print("-" * len(header))
-    for model, mrows in by_model.items():
-        mean_auc = sum(r["auc"] for r in mrows) / len(mrows)
-        print(f"{model:40.40}  {'mean':16}  {mean_auc:14.2f}")
-    overall = sum(r["auc"] for r in rows) / len(rows)
-    print(f"{'ALL':40}  {'mean':16}  {overall:14.2f}\n")
+
+    means = _point_means(rows)
+    for label, mean in means.items():
+        print(f"{'mean over shapes':34}  {'':16}  {label:6.6}  {'':6}  {mean:12.2f}")
+    if means:
+        overall = sum(r["tokens_per_gpu"] for r in rows) / len(rows)
+        print(f"{'mean over all cells':34}  {'':16}  {'':6}  {'':6}  {overall:12.2f}")
+    print("\nRaw values. Normalisation across submissions is done by the organisers "
+          "(see README §7).\n")
 
 
 def write_files(rows: list[dict], output_dir: Path) -> tuple[Path, Path]:
-    """Write scores.csv and scores.json (with per-model + overall aggregates)."""
-    by_model: dict[str, list[dict]] = {}
-    for row in rows:
-        by_model.setdefault(row["model"], []).append(row)
-    model_means = {m: sum(r["auc"] for r in rs) / len(rs) for m, rs in by_model.items()}
-    overall_mean = sum(r["auc"] for r in rows) / len(rows) if rows else 0.0
+    """Write scores.csv and scores.json (with per-point + overall aggregates)."""
+    fieldnames = ["model", "input_len", "output_len", "point", "max_concurrency",
+                  "tokens_per_gpu", "tokens_per_user", "tensor_parallel_size",
+                  "pipeline_parallel_size", "max_num_seqs", "n_layouts"]
 
     csv_path = output_dir / "scores.csv"
     with csv_path.open("w", newline="") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=["model", "input_len", "output_len", "auc", "n_points", "n_frontier"]
-        )
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+        writer.writerows(rows)
 
+    overall = (sum(r["tokens_per_gpu"] for r in rows) / len(rows)) if rows else 0.0
     json_path = output_dir / "scores.json"
     json_path.write_text(json.dumps(
-        {"subtasks": rows, "model_mean_auc": model_means, "overall_mean_auc": overall_mean},
+        {"cells": rows,
+         "point_mean_tokens_per_gpu": _point_means(rows),
+         "overall_mean_tokens_per_gpu": overall},
         indent=2,
     ))
     return csv_path, json_path
@@ -178,7 +215,7 @@ def write_files(rows: list[dict], output_dir: Path) -> tuple[Path, Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("OUTPUT_DIR", help="Directory containing the sweep results (summary.json files).")
+    parser.add_argument("OUTPUT_DIR", help="Directory containing the results (summary.json files).")
     args = parser.parse_args()
 
     output_dir = Path(args.OUTPUT_DIR)
