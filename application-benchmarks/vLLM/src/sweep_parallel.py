@@ -588,17 +588,32 @@ def _submit_group(i, serve_config, bench_configs, port, n, tmp_root, results_dir
     return result.stdout.strip()
 
 
-def _poll_job_states(job_ids: list[str]) -> dict[str, tuple[str, str]]:
-    """Query squeue; return {job_id: (slurm_state, nodelist)} for active jobs."""
+# States a job cannot move out of. Anything else (PENDING, RUNNING, CONFIGURING,
+# …) means SLURM has not caught up yet, not that the job is over.
+_TERMINAL_STATES = frozenset({
+    "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY",
+    "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "PREEMPTED", "REVOKED",
+})
+
+
+def _poll_job_states(job_ids: list[str]) -> dict[str, tuple[str, str]] | None:
+    """Query squeue; return {job_id: (slurm_state, nodelist)} for active jobs.
+
+    Returns None when squeue could not be reached — which is NOT the same as an
+    empty dict (all jobs have left the queue). Conflating the two let a single
+    slow squeue, routine once a campaign has a dozen multi-node jobs queued,
+    mark every worker — running and pending alike — as failed and abort the
+    whole sweep seconds after submitting it.
+    """
     if not job_ids:
         return {}
     try:
         out = subprocess.check_output(
             ["squeue", f"--jobs={','.join(job_ids)}", "--noheader", "--format=%i %T %N"],
-            stderr=subprocess.DEVNULL, timeout=5,
+            stderr=subprocess.DEVNULL, timeout=60,
         ).decode()
     except Exception:
-        return {}
+        return None
     result = {}
     for line in out.splitlines():
         parts = line.split()
@@ -612,7 +627,7 @@ def _get_final_state(job_id: str) -> str:
     try:
         out = subprocess.check_output(
             ["sacct", f"--jobs={job_id}", "--noheader", "--parsable2", "--format=State"],
-            stderr=subprocess.DEVNULL, timeout=5,
+            stderr=subprocess.DEVNULL, timeout=60,
         ).decode().strip()
         lines = [l for l in out.splitlines() if l]
         return lines[0].split()[0] if lines else "UNKNOWN"
@@ -722,26 +737,41 @@ def run_orchestrator(args):
     STATE_ICON = {"pending": "⏳", "running": "🟢", "done": "✅", "FAILED": "❌", "cancelled": "🚫"}
 
     print(f"[orchestrator] Waiting for {len(job_ids)} jobs ...", flush=True)
+    poll_failures = 0
     while True:
         active_ids = [jid for i, jid in job_ids.items()
                       if status[i]["state"] not in ("done", "FAILED", "cancelled")]
 
         if active_ids:
             sq = _poll_job_states(active_ids)
-            for i, jid in job_ids.items():
-                if status[i]["state"] in ("done", "FAILED", "cancelled"):
-                    continue
-                if jid in sq:
-                    slurm_state, nodes = sq[jid]
-                    status[i]["nodes"] = nodes
-                    if slurm_state in ("RUNNING", "COMPLETING"):
-                        status[i]["state"] = "running"
-                    # else stays "pending" (PENDING, CONFIGURING, etc.)
-                else:
-                    # Job left squeue — resolve final state
-                    final = _get_final_state(jid)
-                    status[i]["state"] = "done" if final == "COMPLETED" else "FAILED"
-                    status[i]["nodes"] = ""
+            if sq is None:
+                # squeue was unreachable this cycle. Leave every job's state
+                # untouched and retry — a failed query must never be read as
+                # "all jobs finished".
+                poll_failures += 1
+                if poll_failures in (5, 20) or (poll_failures and poll_failures % 100 == 0):
+                    print(f"\n[orchestrator] WARNING: squeue has failed {poll_failures} "
+                          f"consecutive times; still waiting on {len(active_ids)} job(s).",
+                          flush=True)
+            else:
+                poll_failures = 0
+                for i, jid in job_ids.items():
+                    if status[i]["state"] in ("done", "FAILED", "cancelled"):
+                        continue
+                    if jid in sq:
+                        slurm_state, nodes = sq[jid]
+                        status[i]["nodes"] = nodes
+                        if slurm_state in ("RUNNING", "COMPLETING"):
+                            status[i]["state"] = "running"
+                        # else stays "pending" (PENDING, CONFIGURING, etc.)
+                    else:
+                        # Job left squeue — resolve its final state. Only a terminal
+                        # sacct state is conclusive: PENDING/RUNNING/UNKNOWN mean sacct
+                        # is lagging squeue, so leave it and re-check next cycle.
+                        final = _get_final_state(jid)
+                        if final in _TERMINAL_STATES:
+                            status[i]["state"] = "done" if final == "COMPLETED" else "FAILED"
+                            status[i]["nodes"] = ""
 
         parts = []
         for i in sorted(status):
