@@ -1,0 +1,11 @@
+[
+  {
+    "model": "amd/DeepSeek-V4-Pro-MXFP4",
+    "_point": "low",
+    "_n": 32,
+    "max_concurrency": 1,
+    "num_prompts": 2,
+    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
+    "custom-output-len": 8192
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "model": "amd/DeepSeek-V4-Pro-MXFP4",
+    "trust-remote-code": true,
+    "tokenizer-mode": "deepseek_v4",
+    "enable-expert-parallel": true,
+    "tensor-parallel-size": 8,
+    "max_num_seqs": 32
+  }
+]

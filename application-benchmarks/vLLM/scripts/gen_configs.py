@@ -205,6 +205,17 @@ CLUSTERS = {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
+    # Identical to mi355x-n32 except for the CHECKPOINT: amd/DeepSeek-V4-Pro-MXFP4 declares
+    # MXFP4 activations, so the routed experts run W4A4 on the FP4 matrix cores instead of the
+    # base checkpoint's W4A8. Same engine, same layout, same N — the delta isolates activation
+    # precision. NOT SUBMITTABLE (README §8.5 bars additional activation quantisation, §3/§8.1
+    # pin the checkpoint); see that cluster's system.sh.
+    "amd/mi355x-n32-w4a4": {
+        "deepseek-v4-pro": {
+            "model": "amd/DeepSeek-V4-Pro-MXFP4",
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+        },
+    },
     # Identical to mi355x-n32 except for the engine version (v0.23.0 vs the pinned v0.29.0),
     # so the delta isolates vLLM itself. NOT SUBMITTABLE — README §9 ruling 10 invalidates a
     # submission on a different version; see that cluster's system.sh.

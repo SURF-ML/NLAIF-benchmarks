@@ -68,6 +68,8 @@ AITER_CACHE="${AITER_CACHE:-$HOME/.cache/aiter/flydsl_cache}"
 TRITON_CACHE="${TRITON_CACHE:-$HOME/.cache/triton}"
 AITER_JIT_DIR=/usr/local/lib/python3.12/dist-packages/aiter/jit
 
+# CONTAINER_EXTRA_ENV lets a derived cluster add `-e VAR=VAL` flags without restating the
+# whole arg string (see ../mi355x-n32-w4a4, which needs a checkpoint-specific toggle).
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/vllm-bench:amd-v0.29.0}"
 CONTAINER_RUN_ARGS="${CONTAINER_RUN_ARGS:---device /dev/kfd --device /dev/dri \
 --ipc=host --network=host \
@@ -80,6 +82,6 @@ CONTAINER_RUN_ARGS="${CONTAINER_RUN_ARGS:---device /dev/kfd --device /dev/dri \
 -e VLLM_CACHE_ROOT=$VLLM_CACHE_ROOT \
 -e VLLM_ENGINE_READY_TIMEOUT_S=$VLLM_ENGINE_READY_TIMEOUT_S \
 -e NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME -e VLLM_ROCM_USE_AITER=$VLLM_ROCM_USE_AITER \
--e PYTHONNOUSERSITE=1}"
+-e PYTHONNOUSERSITE=1 ${CONTAINER_EXTRA_ENV:-}}"
 
 CONTAINER_EXEC="${CONTAINER_EXEC:-podman run --rm $CONTAINER_RUN_ARGS $CONTAINER_IMAGE}"
