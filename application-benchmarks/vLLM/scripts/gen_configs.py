@@ -179,6 +179,18 @@ CLUSTERS = {
             "extra": {"_extra_serve_args": "-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY"},
         },
     },
+    "amd/mi355x": {            # 8 x 288GiB MI355X per node
+        "deepseek-v4-pro": {
+            # 2.3 TiB of HBM per node holds the ~806 GiB checkpoint outright, so the scored
+            # layout is TP8 inside a single node — no PP, no Ray, no second node.
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+            # No _extra_serve_args: the -cc.* overrides on snellius/h100 exist because
+            # DeepSeek-V4's default compilation crashes on *that* TP4xPP4 layout. Leave the
+            # ROCm TP8 path on vLLM's defaults; if the engine dies during startup, adding
+            # "_extra_serve_args": "-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY" here is
+            # the first thing to try.
+        },
+    },
 }
 
 
