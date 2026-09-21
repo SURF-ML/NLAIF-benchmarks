@@ -187,7 +187,36 @@ in `oracle/mxfp4.py` before moving weights around.
 
 ---
 
-## 7. Smaller things
+## 7. Bind-mounted cache must exist before the container starts
+
+**Symptom.** On a freshly prepared second node, every measurement failed instantly:
+
+```
+Error: statfs /home/amd/.cache/aiter/flydsl_cache: no such file or directory
+[nosched] measurement 5 FAILED — continuing
+```
+
+**Cause.** `configs/amd/mi355x/system.sh` bind-mounts the AITER kernel cache
+(`-v $AITER_CACHE:.../aiter/jit/flydsl_cache`). podman refuses to start when the *host*
+side of a bind mount does not exist — it will not create it for you. The sweep then
+"succeeds" six times over in the sense that the driver keeps going, producing zero cells.
+
+**Fix.** Seed the caches before the first run on any new node (§3 has the `podman cp`
+recipe), or at minimum `mkdir -p` every path the container mounts:
+
+```bash
+mkdir -p ~/.cache/aiter/flydsl_cache ~/.cache/triton ~/vllm_cache
+```
+
+**Worth noting** the failure mode is quiet: `run_nosched.sh` logs `measurement N FAILED —
+continuing` and exits 0 after producing no `summary.json` at all. Always check the cell
+count, not the exit status:
+
+```bash
+find results/<run> -name summary.json | wc -l    # expect 6
+```
+
+## 8. Smaller things
 
 - **`hf` CLI**: `~/.local/bin/hf` is a broken symlink to a nonexistent path. The working
   binary is `/home/amd/.hf-cli/venv/bin/hf`.
