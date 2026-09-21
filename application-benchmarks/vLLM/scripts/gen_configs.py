@@ -205,6 +205,14 @@ CLUSTERS = {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
+    # Identical to mi355x-n32 except for the engine version (v0.23.0 vs the pinned v0.29.0),
+    # so the delta isolates vLLM itself. NOT SUBMITTABLE — README §9 ruling 10 invalidates a
+    # submission on a different version; see that cluster's system.sh.
+    "amd/mi355x-n32-v023": {
+        "deepseek-v4-pro": {
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+        },
+    },
 }
 
 
