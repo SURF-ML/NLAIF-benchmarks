@@ -1,0 +1,44 @@
+MFMA operand-width counters, mi355-gpu-13 (gfx950), rocprofv3 --pmc, rocpd/SQLite output.
+
+gfx950 counts 8-bit and 4/6-bit matrix ops in separate hardware counters, so "is the FP4
+path used" is measurable rather than inferred:
+    SQ_INSTS_VALU_MFMA_MOPS_F8      8-bit MFMA
+    SQ_INSTS_VALU_MFMA_MOPS_F6F4    4/6-bit MFMA
+
+CONTROL — does collection work at all? (bf16 matmul + fp8 matmul, 20x 4096^3)
+Without this a zero F6F4 elsewhere would be ambiguous between "no 4-bit ops" and
+"counters broken". 5,368,709,120 x 512 FLOP/MOP = 2.749e12 = exactly 20 x 2 x 4096^3,
+so the counters are accurate, not merely non-zero.
+
+A4W4 — AITER fused MoE at DeepSeek-V4's real shapes (4096 tokens, 48 local experts,
+hidden 7168, inter 3072, topk 6), activations AND weights MXFP4 per_1x32.
+149,131,100,160 x 512 = 7.6e13 FLOP vs ~6.8e13 expected from the GEMM count; the excess
+is sorting/padding. Single process, one GPU.
+
+--- control_results ---
+  SQ_INSTS_VALU_MFMA_MOPS_BF16         5,368,709,120
+  SQ_INSTS_VALU_MFMA_MOPS_F6F4         0
+  SQ_INSTS_VALU_MFMA_MOPS_F8           5,368,709,120
+                                       F8=5,368,709,120  F6F4=0  BF16=5,368,709,120
+  -> 4/6-bit share of low-precision MFMA: 0.00%
+--- a4w4_results ---
+  SQ_INSTS_VALU_MFMA_MOPS_BF16         0
+  SQ_INSTS_VALU_MFMA_MOPS_F6F4         149,131,100,160
+  SQ_INSTS_VALU_MFMA_MOPS_F8           0
+                                       F8=0  F6F4=149,131,100,160  BF16=0
+  -> 4/6-bit share of low-precision MFMA: 100.00%
+
+NOT MEASURED — the mixed FP8xFP4 case, which is what the pinned v0.29.0 actually serves.
+Two attempts failed:
+  * Profiling the real engine: vLLM workers die under PMC collection across an 8-process
+    TP fork tree ("Worker proc VllmWorker-N died unexpectedly" during step_fn, both
+    v0.29.0 and v0.23.0). Load succeeds; execution does not.
+  * Building it as a microbenchmark: AITER's quantisers cannot produce MXFP8 activations
+    in this build - get_torch_quant(per_1x32) asserts fp4x2, and get_hip_quant raises
+    "dynamic_per_group_scaled_quant_kernel not implemented for dtype fp8". Consistent
+    with rocm_aiter_moe.py's own comment that mxfp6/mxfp8 are unsupported in AITER.
+
+So which counter a MIXED FP8xFP4 MFMA increments is still open. Indirect evidence that it
+runs at FP8 rate: AITER's own tuned table for the fp8xfp4 path tops out at ~2490 TFLOPS,
+about half of MI355X's ~5 PFLOPS FP8 peak but only a quarter of its ~10 PFLOPS FP4 peak.
+A kernel executing at FP4 rate would not be capped there.

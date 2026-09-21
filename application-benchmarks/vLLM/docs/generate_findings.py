@@ -106,9 +106,40 @@ def main():
     A("| **mean** | | " + " | ".join(means) + " |")
     A("")
 
+    # Best-of-both envelope across the two submittable v0.29.0 layouts. §9 ruling 9:
+    # "each cell takes the best. The reported cells are an envelope and need not all come
+    # from one layout." Both are individually legal, so the envelope is too.
+    a = data.get("N=32  v0.29 EP8"); b = data.get("N=32  v0.29 EP1")
+    if a and b:
+        A("## Submission recommendation: submit both v0.29.0 layouts\n")
+        A("§9 ruling 9 credits each cell to the best layout, and the reported cells need not "
+          "all come from one configuration. EP8 and EP1 are both legal on the pinned engine "
+          "(§8.4 makes `--enable-expert-parallel` tunable) and N=32 is honest in both, so the "
+          "envelope of the two is itself a legal submission and beats either alone.\n")
+        A("| shape | point | EP8 | EP1 | best |")
+        A("|---|---|---|---|---|")
+        tot = {"EP8": 0.0, "EP1": 0.0, "best": 0.0}
+        for i_len, o_len in shapes:
+            for pt in POINTS:
+                k = (i_len, o_len, pt)
+                x, y = a[0].get(k), b[0].get(k)
+                if x is None or y is None:
+                    continue
+                win = "EP1" if y > x else "EP8"
+                tot["EP8"] += x; tot["EP1"] += y; tot["best"] += max(x, y)
+                A(f"| {i_len}→{o_len} | {pt} | {x:,.1f} | {y:,.1f} | **{max(x,y):,.1f}** ({win}) |")
+        n = len(a[0])
+        A(f"| **mean** | | {tot['EP8']/n:,.1f} | {tot['EP1']/n:,.1f} | "
+          f"**{tot['best']/n:,.1f}** |")
+        A(f"\nEnvelope is **+{100*(tot['best']/tot['EP8']-1):.1f}%** over the EP8 baseline "
+          f"and +{100*(tot['best']/tot['EP1']-1):.1f}% over EP1 alone.\n")
+
     # MFMA counter probe. logs/mfma-counters.txt is the parsed rocpd output (rocprofv3
     # writes SQLite by default, so the raw run log does not carry the numbers).
-    counters = ROOT / "logs" / "mfma-counters.txt"
+    # docs/ is tracked; logs/ is gitignored, so the counter results live under docs/.
+    counters = ROOT / "docs" / "mfma-counters.txt"
+    if not counters.exists():
+        counters = ROOT / "logs" / "mfma-counters.txt"
     probe = counters if counters.exists() else ROOT / "logs" / "gpu13-mfma.log"
     A("## Is the FP4 matrix path actually used?\n")
     if counters.exists():

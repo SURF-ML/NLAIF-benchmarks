@@ -10,21 +10,37 @@ Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman, no s
 |---|---|:--:|---|---|---|
 | N=16  v0.29 EP8 | v0.29.0 | 8 | W4A8 | 28.72x | yes |
 | N=32  v0.29 EP8 | v0.29.0 | 8 | W4A8 | 32.61x | yes (submission) |
-| N=32  v0.29 EP1 | v0.29.0 | 1 | W4A8 | _not run_ | yes |
+| N=32  v0.29 EP1 | v0.29.0 | 1 | W4A8 | 32.43x | yes |
 | N=32  v0.23 EP8 | v0.23.0 | 8 | W4A4 | 36.17x | no (§9 r10) |
-| N=32  v0.23 EP1 | v0.23.0 | 1 | W4A4 | _not run_ | no (§9 r10) |
+| N=32  v0.23 EP1 | v0.23.0 | 1 | W4A4 | 29.38x ⚠ below declared N | no (§9 r10) |
 
 ## tok/s/GPU by cell
 
-| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.23 EP8 |
+| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.29 EP1 | N=32  v0.23 EP8 | N=32  v0.23 EP1 |
+|---|---|---|---|---|---|---|
+| 8192→1024 | low | 67.9 | 67.9 | 72.0 | 25.2 | 25.6 |
+| 8192→1024 | mid | 411.2 | 690.7 | 632.6 | 112.5 | 112.3 |
+| 8192→1024 | high | 691.5 | 1,052.7 | 1,127.0 | 112.4 | 112.5 |
+| 1024→8192 | low | 8.8 | 8.7 | 9.3 | 3.3 | 3.4 |
+| 1024→8192 | mid | 59.5 | 107.4 | 115.5 | 45.7 | 45.8 |
+| 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 |
+| **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** |
+
+## Submission recommendation: submit both v0.29.0 layouts
+
+§9 ruling 9 credits each cell to the best layout, and the reported cells need not all come from one configuration. EP8 and EP1 are both legal on the pinned engine (§8.4 makes `--enable-expert-parallel` tunable) and N=32 is honest in both, so the envelope of the two is itself a legal submission and beats either alone.
+
+| shape | point | EP8 | EP1 | best |
 |---|---|---|---|---|
-| 8192→1024 | low | 67.9 | 67.9 | 25.2 |
-| 8192→1024 | mid | 411.2 | 690.7 | 112.5 |
-| 8192→1024 | high | 691.5 | 1,052.7 | 112.4 |
-| 1024→8192 | low | 8.8 | 8.7 | 3.3 |
-| 1024→8192 | mid | 59.5 | 107.4 | 45.7 |
-| 1024→8192 | high | 104.8 | 190.1 | 84.2 |
-| **mean** | | **223.9** | **352.9** | **63.9** |
+| 8192→1024 | low | 67.9 | 72.0 | **72.0** (EP1) |
+| 8192→1024 | mid | 690.7 | 632.6 | **690.7** (EP8) |
+| 8192→1024 | high | 1,052.7 | 1,127.0 | **1,127.0** (EP1) |
+| 1024→8192 | low | 8.7 | 9.3 | **9.3** (EP1) |
+| 1024→8192 | mid | 107.4 | 115.5 | **115.5** (EP1) |
+| 1024→8192 | high | 190.1 | 206.2 | **206.2** (EP1) |
+| **mean** | | 352.9 | 360.4 | **370.1** |
+
+Envelope is **+4.9%** over the EP8 baseline and +2.7% over EP1 alone.
 
 ## Is the FP4 matrix path actually used?
 
