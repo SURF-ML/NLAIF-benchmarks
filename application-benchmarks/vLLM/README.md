@@ -242,9 +242,19 @@ Per-cluster settings live in `configs/<cluster>/system.sh`. Copy the reference
 | `CONTAINER_EXEC` | `apptainer exec --nv --bind /path/to/shared …latest.sif` (NVIDIA) / `--rocm …` (AMD) |
 
 Container-runtime flags and any system-level environment required for correct operation (NIC
-selection on a multi-node fabric, `HSA_*` / RCCL tuning on ROCm, etc.) are platform-specific and
-**permitted** — see [§8.3](#83-tunable-parameters); document any such change in your submission
-([§6](#6-submitting-results)). The structure of `system.sh` is identical everywhere.
+selection on a multi-node fabric, `HSA_*` / RCCL tuning on ROCm, `VLLM_ROCM_USE_AITER=1`, etc.)
+are platform-specific and **permitted** — see [§8.3](#83-tunable-parameters); document any such
+change in your submission ([§6](#6-submitting-results)). The structure of `system.sh` is
+identical everywhere.
+
+**Single-node AMD.** DeepSeek-V4-Pro does not start on ROCm without `VLLM_ROCM_USE_AITER=1`
+(`Sparse attention indexer ROCm path is only supported on AITER`); set it in your `system.sh`.
+Two container-runtime notes if you use podman rather than apptainer: AITER JIT-compiles into its
+own `dist-packages` directory and Triton caches under `$HOME`, so the image tree must be
+writable — rootless podman's default user namespace already gives you this, but `--userns=keep-id`
+does not, and the engine then dies with `[Errno 13] Permission denied` on `aiter/jit/flydsl_cache`.
+Bind-mounting that cache directory out to the host is worth it as well, since each measurement
+starts a fresh engine and would otherwise recompile.
 
 **Multi-node AMD.** The multi-node path (Ray over the allocation) is vendor-agnostic — RCCL honours
 the `NCCL_*` env vars and the container runs the official ROCm image unmodified. On ROCm the
@@ -478,6 +488,19 @@ being evaluated alongside the hardware.
 > DeepSeek-V4-Pro (its default compilation does not serve on the TP4×PP4 layout). This is a
 > per-platform compilation choice, so it lives in that model's config, not the shared harness
 > command.
+
+> **ROCm: `VLLM_ROCM_USE_AITER=1` is permitted, and is required to run DeepSeek-V4-Pro at all.**
+> AITER is AMD's fused-kernel library. It ships inside the official `vllm/vllm-openai-rocm`
+> image, so enabling it installs nothing — the env var only selects a code path already present
+> at the pinned version, which is why [§8.5](#85-prohibited) and ruling 5 do not apply. It falls
+> under both *Attention backend* and *MoE & linear kernels* above (it supplies the sparse-attention
+> indexer and the mixed MoE GEMM), and under *System / operational environment*: without it vLLM
+> refuses to build the executor —
+> `Sparse attention indexer ROCm path is only supported on AITER` — so this is not a speed lever
+> but the only path to running the fixed configuration. Note that AITER JIT-compiles any kernel
+> the image has no prebuilt entry for, from source bundled in that same image, for the local
+> `gfx` arch; this is the shipped package's normal operation, the same class as torch.compile /
+> inductor. Record it in the submission's deviations note ([§6](#6-submitting-results)).
 
 ### 8.4 Parallelism
 
