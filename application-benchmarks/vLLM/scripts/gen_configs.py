@@ -179,16 +179,30 @@ CLUSTERS = {
             "extra": {"_extra_serve_args": "-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY"},
         },
     },
-    "amd/mi355x": {            # 8 x 288GiB MI355X per node
+    # Two MI355X variants, differing only in N (max_num_seqs) and the GPU_MEM_UTIL that makes
+    # that N reachable. N is a declared, self-policed submission parameter, so the choice is a
+    # measurement, not a preference: at GPU_MEM_UTIL=0.90 the TP8 engine reports
+    #     GPU KV cache size: 263,820 tokens, Maximum concurrency for 9,216 tokens: 28.63x
+    # which does not cover a concurrency-32 high point. mi355x therefore declares the nearest
+    # lower power of two; mi355x-n32 buys the headroom back with VRAM (0.97 -> 32.61x, the
+    # first value with real margin — see that cluster's system.sh for the measured table).
+    # Run both and submit whichever scores higher: they are alternative operating envelopes
+    # for the same layout, not a fallback and a primary.
+    "amd/mi355x": {            # 8 x 288GiB MI355X per node, N=16 @ GPU_MEM_UTIL=0.90
         "deepseek-v4-pro": {
             # 2.3 TiB of HBM per node holds the ~806 GiB checkpoint outright, so the scored
             # layout is TP8 inside a single node — no PP, no Ray, no second node.
-            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 16}],
             # No _extra_serve_args: the -cc.* overrides on snellius/h100 exist because
             # DeepSeek-V4's default compilation crashes on *that* TP4xPP4 layout. Leave the
             # ROCm TP8 path on vLLM's defaults; if the engine dies during startup, adding
             # "_extra_serve_args": "-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY" here is
             # the first thing to try.
+        },
+    },
+    "amd/mi355x-n32": {        # same node, N=32 @ GPU_MEM_UTIL=0.97 (see configs/.../system.sh)
+        "deepseek-v4-pro": {
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
 }

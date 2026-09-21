@@ -5,6 +5,6 @@
     "tokenizer-mode": "deepseek_v4",
     "enable-expert-parallel": true,
     "tensor-parallel-size": 8,
-    "max_num_seqs": 32
+    "max_num_seqs": 16
   }
 ]
