@@ -196,7 +196,7 @@ The scored configuration space per submission is:
 | Datasets | `datasets/*.jsonl` from the organisers ([§4](#4-workloads--datasets)). |
 
 The pinned vLLM version is `VLLM_VERSION` in
-[`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) — currently **`v0.23.0`**.
+[`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) — currently **`v0.29.0`**.
 Every submission must use this version; a mismatch invalidates the submission. The pin is chosen as
 the newest version that supports the full target-hardware matrix (FP4 / DeepSeek-V4 kernel support
 varies by vendor and version). Bumping it is a global decision by the organisers that invalidates
