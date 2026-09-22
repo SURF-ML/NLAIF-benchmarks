@@ -250,7 +250,39 @@ be cleared out from under a long-running campaign, simultaneously across nodes.
   six measurements waits out the full 1800 s `--serve-timeout`. A missing checkpoint costs
   three hours of nothing before the driver reports failure.
 
-## 9. Smaller things
+## 9. DCP is unavailable for DeepSeek-V4 — do not plan around it
+
+`--decode-context-parallel-size` shards the decode KV cache across TP ranks without
+expanding the world size, which makes it the obvious lever against MLA's replicated KV
+(575.9 KiB/token measured vs 34.3 KiB/token theoretical, a factor of 16.8). It does not
+work for this model:
+
+```
+NotImplementedError: DCP is not supported with sparse indexer KV compression
+(compress_ratio=4).
+  vllm/v1/attention/backends/mla/indexer.py:630
+```
+
+The guard is unconditional on size:
+
+```python
+if self.dcp_world_size > 1 and self.compress_ratio > 1:
+    raise NotImplementedError(...)
+```
+
+DeepSeek-V4's sparse indexer sets `compress_ratio=4`, so **any** `dcp > 1` refuses at engine
+init. Measured: `dcp=1` serves normally, `dcp=2` and `dcp=8` both fail. Nothing to tune,
+and nothing for the benchmark spec to permit — it is an engine limitation, not a rule.
+
+**Two process notes from running this scan**, both of which cost a rerun:
+
+- `pkill -f "vllm serve"` in a probe loop matched broadly enough to kill the scan script
+  itself (exit 144). Give each engine a named container and `podman rm -f` it by name.
+- Waiting for `Maximum concurrency` alone is not enough — the engine prints `Available KV
+  cache memory` a few seconds earlier and can then die during graph capture. Wait on the
+  error strings too, or a failure looks like a hang.
+
+## 10. Smaller things
 
 - **`hf` CLI**: `~/.local/bin/hf` is a broken symlink to a nonexistent path. The working
   binary is `/home/amd/.hf-cli/venv/bin/hf`.

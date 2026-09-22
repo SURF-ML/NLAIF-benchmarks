@@ -16,9 +16,13 @@ ORCH_SBATCH_ARGS="${ORCH_SBATCH_ARGS:-}"
 # buffers and the fragmentation spike at the high operating point.
 export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 
-# Model cache. This box has no shared filesystem, so the weights live on the local RAM disk
-# (/dev/shm, 1.5 TiB). For a two-node run every node needs its OWN copy at this same path.
-export HF_HOME="${HF_HOME:-/dev/shm/hf_hub}"
+# Model cache. Weights live on the 56 TiB local SSD array at /mnt/data, NOT on /dev/shm.
+# /dev/shm was the original home and loads faster (19s vs minutes), but it is not durable:
+# an 806 GiB checkpoint was silently cleared from /dev/shm on both nodes overnight, mid
+# campaign, without a reboot (see docs/AMD-MI355X-TROUBLESHOOTING.md §8). The SSD trades
+# load time for not having to re-download 806 GiB at unpredictable moments.
+# There is no shared filesystem, so each node needs its own copy at this path.
+export HF_HOME="${HF_HOME:-/mnt/data/hf_hub}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 
 # torch.compile / inductor artifacts. Deliberately NOT on /dev/shm: the checkpoint already
@@ -74,7 +78,7 @@ CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/vllm-bench:amd-v0.29.0}"
 CONTAINER_RUN_ARGS="${CONTAINER_RUN_ARGS:---device /dev/kfd --device /dev/dri \
 --ipc=host --network=host \
 --security-opt seccomp=unconfined --cap-add=SYS_PTRACE \
--v $HOME:$HOME -w $REPO_ROOT \
+-v $HOME:$HOME -v /mnt/data:/mnt/data -w $REPO_ROOT \
 -v $AITER_CACHE:$AITER_JIT_DIR/flydsl_cache \
 -e FLYDSL_RUNTIME_CACHE_DIR=$AITER_JIT_DIR/flydsl_cache \
 -e TRITON_CACHE_DIR=$TRITON_CACHE \

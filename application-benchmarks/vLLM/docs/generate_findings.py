@@ -206,27 +206,36 @@ def main():
               f"(`{(rec.get((8192,1024,32)) or {}).get('image','?')}`) where we pin v0.29.0, and "
               "engine version was worth 5.5x between v0.23.0 and v0.29.0 on this stack. A few "
               "percent either way is well inside that.\n")
-        # KV pool — the discrepancy that explains their concurrency range
-        r16 = rec.get((8192, 1024, 32))
-        if r16 and r16["metrics"].get("kv_cache_pool_tokens"):
-            theirs_kv = r16["metrics"]["kv_cache_pool_tokens"]
-            A("### Their KV pool is 14.6x ours — unexplained, and worth chasing\n")
-            A(f"| | KV pool (tokens) | concurrent @ 9216 tok/seq |")
+        # KV pool gap — measured, and the obvious explanation ruled out.
+        r32 = rec.get((8192, 1024, 32))
+        if r32 and r32["metrics"].get("kv_cache_pool_tokens"):
+            theirs_kv = r32["metrics"]["kv_cache_pool_tokens"]
+            A("### Their reported KV pool is larger than ours — cause still unknown\n")
+            A("| | KV pool (tokens) | per-token cost |")
             A("|---|---|---|")
-            A(f"| ours (v0.29.0, GPU_MEM_UTIL=0.97) | 300,533 | 32.6 |")
-            A(f"| SemiAnalysis, same shape | {theirs_kv:,.0f} | {theirs_kv/9216:,.0f} |")
-            A(f"\nThis is the mechanism behind their concurrency sweep reaching 512 where ours "
-              f"stops at 32 — not a scheduling difference, they simply have far more KV cache "
-              f"on the same hardware. Their 1024→1024 runs report a different pool again "
-              f"({rec.get((1024,1024,32),{}).get('metrics',{}).get('kv_cache_pool_tokens',0):,.0f} "
-              f"tokens), so the figure varies with configuration rather than being a fixed "
-              f"property of the machine.\n")
-            A("**If some of that gap is recoverable, it matters directly for scoring**: N is "
-              "capped by KV capacity, the `high` operating point is N, and our high cells are "
-              "the largest numbers in the submission. Worth checking whether MLA KV is being "
-              "replicated across TP ranks in our configuration where theirs shards it, and "
-              "what `--max-model-len` and block size they run. We have not established the "
-              "cause; it is recorded here as an open lead, not a finding.\n")
+            A("| ours (v0.29.0, GPU_MEM_UTIL=0.97, 165.05 GiB) | 300,533 | 575.9 KiB |")
+            A(f"| SemiAnalysis, same shape | {theirs_kv:,.0f} | — |")
+            A(f"| their 1024→1024 runs | "
+              f"{rec.get((1024,1024,32),{}).get('metrics',{}).get('kv_cache_pool_tokens',0):,.0f} | — |\n")
+            A("**Decode context parallelism is ruled out as the explanation.** DeepSeek's MLA "
+              "KV is replicated across TP ranks at `dcp=1` (575.9 KiB/token measured against "
+              "34.3 KiB/token theoretical, a factor of 16.8), so `--decode-context-parallel-size` "
+              "looked like the lever. It is not available for this model: vLLM raises\n")
+            A("```\nNotImplementedError: DCP is not supported with sparse indexer KV "
+              "compression (compress_ratio=4).\n  vllm/v1/attention/backends/mla/indexer.py:630\n```\n")
+            A("The guard is `if self.dcp_world_size > 1 and self.compress_ratio > 1`, so **any** "
+              "`dcp > 1` fails while DeepSeek-V4's sparse indexer is in use. Measured: `dcp=1` "
+              "works (our baseline), `dcp=2` and `dcp=8` both refuse at engine init. This is an "
+              "engine limitation, not a rules question — there is nothing for the spec to permit.\n")
+            A("So the gap is unexplained. One sober possibility worth checking before treating "
+              "it as a real capacity difference: **their metric may be summed across the 8 GPUs "
+              "where vLLM's `GPU KV cache size` is the unique pool.** MLA replicates KV, so a "
+              "per-GPU sum would be 8x the unique figure; that would put their true pool at "
+              f"~{theirs_kv/8:,.0f} tokens, about {theirs_kv/8/300533:.1f}x ours rather than "
+              f"{theirs_kv/300533:.1f}x — a gap that ordinary `--max-model-len` and memory-"
+              "utilisation differences could account for. Their two shapes reporting different "
+              "pools (which a fixed hardware property would not) is consistent with that reading. "
+              "We have not confirmed how their harness defines the field.\n")
 
     # MFMA counter probe. logs/mfma-counters.txt is the parsed rocpd output (rocprofv3
     # writes SQLite by default, so the raw run log does not carry the numbers).
