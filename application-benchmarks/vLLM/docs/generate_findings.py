@@ -30,14 +30,20 @@ def load(pattern):
         if not os.path.basename(d).endswith(suffix):
             continue
         f = pathlib.Path(d) / "scores.csv"
-        if f.exists():
-            best = f
+        if not f.exists():
+            continue
+        # Prefer a complete run. A sweep interrupted partway still writes a scores.csv, and
+        # silently charting 4 cells as if they were 6 would misstate the mean.
+        ncells = sum(1 for _ in csv.DictReader(open(f)))
+        if best is None or ncells >= best[1]:
+            best = (f, ncells)
     if not best:
         return None, None
+    f, _ = best
     rows = {}
-    for r in csv.DictReader(open(best)):
+    for r in csv.DictReader(open(f)):
         rows[(r["input_len"], r["output_len"], r["point"])] = float(r["tokens_per_gpu"])
-    return rows, best.parent
+    return rows, f.parent
 
 def kv_line(run_dir):
     """The engine's own reported capacity, for auditing the declared N."""
@@ -133,6 +139,36 @@ def main():
           f"**{tot['best']/n:,.1f}** |")
         A(f"\nEnvelope is **+{100*(tot['best']/tot['EP8']-1):.1f}%** over the EP8 baseline "
           f"and +{100*(tot['best']/tot['EP1']-1):.1f}% over EP1 alone.\n")
+
+    # Cross-node reproducibility, when the same config has been run on both nodes.
+    import glob as _g
+    g13 = _g.glob(str(ROOT / "results/*gpu13_amd-mi355x-n32-ep1/scores.csv"))
+    g37 = [f for f in _g.glob(str(ROOT / "results/*_amd-mi355x-n32-ep1/scores.csv"))
+           if "gpu13" not in f]
+    if g13 and g37:
+        x = {(r["input_len"], r["output_len"], r["point"]): float(r["tokens_per_gpu"])
+             for r in csv.DictReader(open(sorted(g13)[-1]))}
+        y = {(r["input_len"], r["output_len"], r["point"]): float(r["tokens_per_gpu"])
+             for r in csv.DictReader(open(sorted(g37)[-1]))}
+        common = [k for k in x if k in y]
+        if common:
+            A("## Cross-node reproducibility\n")
+            A("The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37. This "
+              "is what establishes that the prefill-mid regression is a real effect rather "
+              "than run-to-run variance.\n")
+            A("| shape | point | gpu-13 | gpu-37 | spread |")
+            A("|---|---|---|---|---|")
+            worst = 0.0
+            for i_len, o_len in shapes:
+                for pt in POINTS:
+                    k = (i_len, o_len, pt)
+                    if k not in x or k not in y:
+                        continue
+                    d = abs(x[k] - y[k]) / max(x[k], y[k]) * 100
+                    worst = max(worst, d)
+                    A(f"| {i_len}→{o_len} | {pt} | {x[k]:,.1f} | {y[k]:,.1f} | {d:.1f}% |")
+            A(f"\nWorst-case disagreement across {len(common)} shared cells: "
+              f"**{worst:.1f}%**.\n")
 
     # MFMA counter probe. logs/mfma-counters.txt is the parsed rocpd output (rocprofv3
     # writes SQLite by default, so the raw run log does not carry the numbers).
