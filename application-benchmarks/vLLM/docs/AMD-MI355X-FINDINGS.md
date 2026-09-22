@@ -70,24 +70,24 @@ All tok/s/GPU. **The two independent implementations agree to within 5%**, which
 
 Caveat on the remaining gap: they run a vLLM **nightly** (`vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36`) where we pin v0.29.0, and engine version was worth 5.5x between v0.23.0 and v0.29.0 on this stack. A few percent either way is well inside that.
 
-### Their reported KV pool is larger than ours — cause still unknown
+### The KV pool gap: every hypothesis tested, all refuted
 
-| | KV pool (tokens) | per-token cost |
-|---|---|---|
-| ours (v0.29.0, GPU_MEM_UTIL=0.97, 165.05 GiB) | 300,533 | 575.9 KiB |
-| SemiAnalysis, same shape | 4,386,107 | — |
-| their 1024→1024 runs | 8,660,728 | — |
+SemiAnalysis report 4,386,107 KV tokens for this shape against our 300,533. That looked like a large real capacity difference and therefore a cap on N, since the `high` operating point **is** N. It does not survive measurement.
 
-**Decode context parallelism is ruled out as the explanation.** DeepSeek's MLA KV is replicated across TP ranks at `dcp=1` (575.9 KiB/token measured against 34.3 KiB/token theoretical, a factor of 16.8), so `--decode-context-parallel-size` looked like the lever. It is not available for this model: vLLM raises
+| config | KV cache | pool tokens | max conc |
+|---|---|---|---|
+| v0.29.0 (pinned), spec-mandated `fp8` | 165.05 GiB | 300,533 | 32.61x |
+| v0.30.0, spec-mandated `fp8` | 166.27 GiB | 302,761 | 32.85x |
+| v0.30.0, `--kv-cache-dtype auto` | 166.27 GiB | 302,761 | 32.85x |
+| v0.30.0, `-dcp 8` | — | — | `NotImplementedError` |
 
-```
-NotImplementedError: DCP is not supported with sparse indexer KV compression (compress_ratio=4).
-  vllm/v1/attention/backends/mla/indexer.py:630
-```
+- **The engine version is not the cause.** v0.30.0 moves the pool 0.7%.
+- **§8.1's literal `fp8` is not the cause.** `auto` is byte-identical on ROCm; the `fp8_ds_mla` layout in the v0.30.0 notes is qualified *"with FlashMLA"*, a CUDA path.
+- **DCP is not available**, on either version: `DCP is not supported with sparse indexer KV compression (compress_ratio=4)`. v0.30.0's "PCP+DCP on sparse-MLA models" (#56157) does not lift it here.
 
-The guard is `if self.dcp_world_size > 1 and self.compress_ratio > 1`, so **any** `dcp > 1` fails while DeepSeek-V4's sparse indexer is in use. Measured: `dcp=1` works (our baseline), `dcp=2` and `dcp=8` both refuse at engine init. This is an engine limitation, not a rules question — there is nothing for the spec to permit.
+**Most likely explanation, unproven: their figure is not the same quantity.** Their harness computes `kv_cache_pool_tokens` via `sum_server_log_capacities`, which sums `GPU KV cache size` across an *iterable of server logs* (`infx/results/agentic/backends/vllm.py`). vLLM's own figure is the unique pool for one engine. A summing artifact fits the evidence better than any configuration difference — not least because their throughput matches ours within 5% at the concurrencies where both engines fit the batch, which a genuine 14.6x capacity advantage would not leave untouched.
 
-So the gap is unexplained. One sober possibility worth checking before treating it as a real capacity difference: **their metric may be summed across the 8 GPUs where vLLM's `GPU KV cache size` is the unique pool.** MLA replicates KV, so a per-GPU sum would be 8x the unique figure; that would put their true pool at ~548,263 tokens, about 1.8x ours rather than 14.6x — a gap that ordinary `--max-model-len` and memory-utilisation differences could account for. Their two shapes reporting different pools (which a fixed hardware property would not) is consistent with that reading. We have not confirmed how their harness defines the field.
+**A caveat on our own arithmetic.** The "575.9 KiB/token, 16.8x the MLA theoretical" figure quoted earlier in this investigation assumed the MLA tensor (kv_lora 512 + rope 64, fp8, 61 layers = 34.3 KiB) is the whole per-token cost. DeepSeek-V4 also keeps a sparse-indexer cache — the logs show `Using FP8 indexer cache for Lightning Indexer` and `index_topk: 1024` — which that estimate ignores. If the indexer dominates, our pool is not anomalous at all and there was never a gap to explain. We did not measure the split.
 
 ## Is the FP4 matrix path actually used?
 
