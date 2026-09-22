@@ -1,0 +1,263 @@
+{
+  "source": "https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-V4-Pro",
+  "filter": "hardware=mi355x framework=vllm precision=fp4 TP8/EP1 non-disagg no-spec single-node",
+  "fetched": "2026-09-22",
+  "records": [
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 4,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 36.76968395010984,
+        "input_tput_per_gpu": 18.47430289470528,
+        "output_tput_per_gpu": 18.295381055404558,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.6488729399919976,
+        "mean_tpot": 0.025811427310093404,
+        "mean_e2el": 24.322876103181624
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 8,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 70.1061403433477,
+        "input_tput_per_gpu": 34.92313265842801,
+        "output_tput_per_gpu": 35.183007684919694,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.3750442463613581,
+        "mean_tpot": 0.027405528092535537,
+        "mean_e2el": 25.8183850389265
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 16,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 128.93574487125116,
+        "input_tput_per_gpu": 64.8091968757998,
+        "output_tput_per_gpu": 64.12654799545136,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.3211007561549195,
+        "mean_tpot": 0.030141197246185424,
+        "mean_e2el": 27.904915477354372
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 32,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 210.79989617042483,
+        "input_tput_per_gpu": 105.23298020427902,
+        "output_tput_per_gpu": 105.56691596614581,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.40223893964503077,
+        "mean_tpot": 0.03648350328418571,
+        "mean_e2el": 34.085208693832826
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 64,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 326.5299173983008,
+        "input_tput_per_gpu": 163.30175663220345,
+        "output_tput_per_gpu": 163.22816076609737,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.5868208243922709,
+        "mean_tpot": 0.04699706334583438,
+        "mean_e2el": 43.90214752380598
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 128,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 500.86843187564904,
+        "input_tput_per_gpu": 250.70899596124102,
+        "output_tput_per_gpu": 250.15943591440802,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 0.8057849200024065,
+        "mean_tpot": 0.06148360152184305,
+        "mean_e2el": 57.354086461733274
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 256,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 763.9397931584482,
+        "input_tput_per_gpu": 381.7852210019978,
+        "output_tput_per_gpu": 382.1545721564504,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 1.1612844882623903,
+        "mean_tpot": 0.08053667018427406,
+        "mean_e2el": 75.41270970268833
+      }
+    },
+    {
+      "isl": 1024,
+      "osl": 1024,
+      "conc": 512,
+      "image": "vllm/vllm-openai-rocm:nightly-09663abde0f50944a8d5ea30120666024b503faa",
+      "date": "2026-07-04",
+      "metrics": {
+        "tput_per_gpu": 1041.8977072878438,
+        "input_tput_per_gpu": 520.708799492474,
+        "output_tput_per_gpu": 521.1889077953698,
+        "kv_cache_pool_tokens": 8660728,
+        "mean_ttft": 1.9198567912909765,
+        "mean_tpot": 0.11823881749360651,
+        "mean_e2el": 110.95102258114329
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 4,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 245.4886515240511,
+        "input_tput_per_gpu": 218.1799821089215,
+        "output_tput_per_gpu": 27.308669415129593,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 0.4319310442195274,
+        "mean_tpot": 0.017409346771616426,
+        "mean_e2el": 16.435064830153713
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 8,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 436.2099444328344,
+        "input_tput_per_gpu": 387.17258945331525,
+        "output_tput_per_gpu": 49.03735497951914,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 0.4978450543843792,
+        "mean_tpot": 0.01949376850987508,
+        "mean_e2el": 18.545144442748278
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 16,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 726.9138366313881,
+        "input_tput_per_gpu": 646.3671333365519,
+        "output_tput_per_gpu": 80.54670329483619,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 0.6792179485782981,
+        "mean_tpot": 0.023281793167508936,
+        "mean_e2el": 21.98227677482937
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 32,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 1105.6846821802396,
+        "input_tput_per_gpu": 982.0383712507977,
+        "output_tput_per_gpu": 123.64631092944192,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 0.93160172061107,
+        "mean_tpot": 0.030461066213654263,
+        "mean_e2el": 29.136538679401564
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 64,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 1502.7857033819928,
+        "input_tput_per_gpu": 1336.064744934071,
+        "output_tput_per_gpu": 166.72095844792173,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 1.503485806639219,
+        "mean_tpot": 0.04548212130566409,
+        "mean_e2el": 43.45493264775432
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 128,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 1833.385838939317,
+        "input_tput_per_gpu": 1630.3099397192946,
+        "output_tput_per_gpu": 203.07589922002248,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 2.4620969298632644,
+        "mean_tpot": 0.07496586323285574,
+        "mean_e2el": 71.4971612612408
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 256,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 2192.8487305282997,
+        "input_tput_per_gpu": 1949.128798368541,
+        "output_tput_per_gpu": 243.71993215975866,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 4.75779966885857,
+        "mean_tpot": 0.12462657608005792,
+        "mean_e2el": 119.82252724658028
+      }
+    },
+    {
+      "isl": 8192,
+      "osl": 1024,
+      "conc": 512,
+      "image": "vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36",
+      "date": "2026-09-09",
+      "metrics": {
+        "tput_per_gpu": 2514.8471207207785,
+        "input_tput_per_gpu": 2235.4219184167423,
+        "output_tput_per_gpu": 279.4252023040363,
+        "kv_cache_pool_tokens": 4386107,
+        "mean_ttft": 8.972791002016994,
+        "mean_tpot": 0.21717728232286881,
+        "mean_e2el": 209.44883676459767
+      }
+    }
+  ]
+}

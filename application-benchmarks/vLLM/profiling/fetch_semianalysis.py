@@ -1,66 +1,51 @@
 #!/usr/bin/env python3
 """Pull SemiAnalysis InferenceX results for the configs comparable to ours.
 
-Their artifacts are on a public repo but GitHub requires auth to download artifacts, so
-this needs a token with public_repo scope:
+Their dashboard is a Next.js app; the numbers come from its own public API. The model
+parameter is the DISPLAY name, not the URL slug — /inference/deepseek-v4 renders from
+?model=DeepSeek-V4-Pro, and passing "deepseek-v4" returns {"error":"Unknown model"}.
 
-    GITHUB_TOKEN=ghp_... python3 profiling/fetch_semianalysis.py [RUN_ID]
+    python3 profiling/fetch_semianalysis.py            # refresh docs/semianalysis-results.json
 
-Writes docs/semianalysis-results.json and prints the cells that line up with ours.
-Their run 28593351944 is DeepSeek-V4 FP4 on MI355X at TP8/EP1 — same model, hardware and
-parallel layout we use, so the shape+concurrency pairs below are directly comparable
-modulo the caveats printed at the end.
+(The GitHub Actions artifacts on SemiAnalysisAI/InferenceX carry the same data but need a
+token — artifact downloads are authenticated even for public repos. This API does not.)
 """
-import io, json, os, re, sys, urllib.request, zipfile, pathlib
+import json, pathlib, sys, urllib.request
 
-REPO = "SemiAnalysisAI/InferenceX"
-RUN = sys.argv[1] if len(sys.argv) > 1 else "28593351944"
-TOK = os.environ.get("GITHUB_TOKEN")
-if not TOK:
-    sys.exit("set GITHUB_TOKEN (public_repo scope is enough)")
+URL = "https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-V4-Pro"
+OUT = pathlib.Path(__file__).resolve().parent.parent / "docs" / "semianalysis-results.json"
+KEEP = ("tput_per_gpu", "input_tput_per_gpu", "output_tput_per_gpu",
+        "kv_cache_pool_tokens", "mean_ttft", "mean_tpot", "mean_e2el")
 
-def api(url):
-    r = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOK}",
-                                             "Accept": "application/vnd.github+json"})
-    return urllib.request.urlopen(r, timeout=60)
+# The server gzips regardless of Accept-Encoding, so decompress explicitly.
+req = urllib.request.Request(URL, headers={"User-Agent": "Mozilla/5.0",
+                                           "Accept-Encoding": "gzip"})
+raw = urllib.request.urlopen(req, timeout=90).read()
+if raw[:2] == b"\x1f\x8b":
+    import gzip
+    raw = gzip.decompress(raw)
+data = json.loads(raw)
 
-arts = json.load(api(f"https://api.github.com/repos/{REPO}/actions/runs/{RUN}/artifacts?per_page=100"))
-out = {}
-for a in arts["artifacts"]:
-    m = re.match(r"bmk_dsv4_(\w+?)_fp4_vllm_(tp\d+-ep\d+)[^_]*_.*?_conc(\d+)_", a["name"])
-    if not m:
-        continue
-    shape, layout, conc = m.group(1), m.group(2), int(m.group(3))
-    try:
-        z = zipfile.ZipFile(io.BytesIO(api(a["archive_download_url"]).read()))
-    except Exception as e:
-        print(f"  skip {a['name']}: {e}"); continue
-    for n in z.namelist():
-        body = z.read(n).decode("utf-8", "replace")
-        try:
-            out[f"{shape}/{layout}/conc{conc}"] = json.loads(body)
-        except json.JSONDecodeError:
-            out[f"{shape}/{layout}/conc{conc}"] = {"_raw": body[:2000], "_file": n}
+# Match our configuration: single-node MI355X, vLLM, FP4, TP8/EP1, no disagg, no speculation.
+m = [r for r in data
+     if r.get("hardware") == "mi355x" and r.get("framework") == "vllm"
+     and r.get("precision") == "fp4" and not r.get("disagg")
+     and r.get("decode_tp") == 8 and r.get("decode_ep") == 1
+     and not r.get("is_multinode") and str(r.get("spec_method")) in ("none", "None")]
+if not m:
+    sys.exit("no matching records — check whether the filter fields changed")
 
-dst = pathlib.Path("docs/semianalysis-results.json")
-dst.write_text(json.dumps(out, indent=2, sort_keys=True))
-print(f"wrote {dst} with {len(out)} configs\n")
-
-# Cells where their grid and ours coincide exactly.
-print("Directly comparable to our runs (same model/hardware/TP8-EP1/shape/concurrency):")
-for key, ours in [("8k1k/tp8-ep1/conc32",  "8192->1024 high  ours EP1 = 1127.0 tok/s/GPU"),
-                  ("8k1k/tp8-ep1/conc16",  "8192->1024 mid   ours EP1 =  632.6 tok/s/GPU")]:
-    print(f"  {key:26s} {ours}")
-    v = out.get(key)
-    print(f"      theirs: {json.dumps(v)[:400] if v else 'NOT FOUND'}")
-print("""
-Caveats before treating any delta as meaningful:
-  * vLLM version — they pin a nightly, we pin v0.29.0. Worth 5.5x between v0.23.0 and
-    v0.29.0, so version is not a rounding error here.
-  * --max-model-len — ours is fixed at 9216 by the spec; theirs is not stated. This sets
-    KV footprint per sequence and therefore the concurrency their server can admit.
-  * --kv-cache-dtype fp8, prefix caching off, --ignore-eos — fixed for us by §8.1; unknown
-    for them.
-  * Normalisation — our tok/s/GPU divides total throughput by TP*PP = 8. Check whether
-    their figure is total or per-GPU before comparing.
-""")
+out = {"source": URL,
+       "filter": "hardware=mi355x framework=vllm precision=fp4 TP8/EP1 non-disagg no-spec single-node",
+       "fetched": __import__("datetime").date.today().isoformat(),
+       "records": [{"isl": r["isl"], "osl": r["osl"], "conc": r["conc"],
+                    "image": r.get("image"), "date": r.get("date"),
+                    "metrics": {k: r["metrics"].get(k) for k in KEEP}}
+                   for r in sorted(m, key=lambda r: (r["isl"], r["conc"]))]}
+OUT.write_text(json.dumps(out, indent=2))
+print(f"wrote {OUT} with {len(out['records'])} records")
+for r in out["records"]:
+    if r["isl"] == 8192 and r["conc"] in (16, 32):
+        print(f"  {r['isl']}->{r['osl']} conc{r['conc']:<4} "
+              f"{r['metrics']['tput_per_gpu']:8.1f} tok/s/GPU  "
+              f"KV pool {r['metrics']['kv_cache_pool_tokens']:,}")

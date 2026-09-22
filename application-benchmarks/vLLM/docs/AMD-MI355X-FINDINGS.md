@@ -57,24 +57,29 @@ Worst-case disagreement across 4 shared cells: **0.3%**.
 
 ## External comparison: SemiAnalysis InferenceX
 
-Their run [28593351944](https://github.com/SemiAnalysisAI/InferenceX/actions/runs/28593351944) (`dsv4-fp4-mi355x-vllm`) is DeepSeek-V4-Pro, FP4, MI355X, **TP8/EP1** — same model, same hardware, same parallel layout as our `mi355x-n32-ep1` config. Verified from the artifact names (`bmk_dsv4_{1k1k,8k1k}_fp4_vllm_tp8-ep1-...conc{4..512}`), not inferred.
+Source: `https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-V4-Pro` (fetched 2026-09-22), filtered to `hardware=mi355x framework=vllm precision=fp4 TP8/EP1 non-disagg no-spec single-node` — i.e. the same model, hardware and TP8/EP1 layout we run.
 
-Two of their cells coincide with ours exactly — same shape, same concurrency:
+Their `8192→1024` shape matches ours exactly, at concurrencies 16 and 32 which are our `mid` and `high` points. (Their other shape is 1024→1024; ours is 1024→8192, so those do not compare.)
 
-| their config | our cell | ours (tok/s/GPU) | theirs |
-|---|---|---|---|
-| `8k1k … conc16` | 8192→1024 mid (conc 16) | 632.6 | _not retrieved_ |
-| `8k1k … conc32` | 8192→1024 high (conc 32) | 1,127.0 | _not retrieved_ |
+| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |
+|---|---|---|---|---|---|
+| 16 | mid | 726.9 | 690.7 | 632.6 | **-5.0%** |
+| 32 | high | 1,105.7 | 1,052.7 | 1,127.0 | **+1.9%** |
 
-**Their numbers are not filled in because GitHub requires authentication to download workflow artifacts, even on a public repo (the API returns 401).** The values live in the per-config `bmk_…` artifacts. To populate this table:
+All tok/s/GPU. **The two independent implementations agree to within 5%**, which is the main thing this comparison establishes: our harness and theirs measure the same hardware the same way.
 
-```bash
-GITHUB_TOKEN=<token with public_repo> python3 profiling/fetch_semianalysis.py
-```
+Caveat on the remaining gap: they run a vLLM **nightly** (`vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36`) where we pin v0.29.0, and engine version was worth 5.5x between v0.23.0 and v0.29.0 on this stack. A few percent either way is well inside that.
 
-**Their remaining concurrencies (64–512) have no counterpart here**, and that is a workload difference rather than a capability one. Our two shapes both sum to exactly 9216 tokens (§4, so one N covers both), giving 300,533 / 9216 = **32.6** concurrent sequences. Their 1k1k shape is 2048 tokens per sequence, so the same KV cache holds **146.7** — 4.5x more, purely because the sequences are shorter. Their 8k1k shape is also 9216 tokens, so at concurrency 64+ it exceeds what the cache admits and the scheduler must queue: their concurrency is client-side offered load, ours is the server-side admitted batch (`max_num_seqs`). The two axes are not interchangeable.
+### Their KV pool is 14.6x ours — unexplained, and worth chasing
 
-Before treating any gap as real, check: their vLLM is a nightly and ours is pinned v0.29.0 (worth 5.5x between v0.23.0 and v0.29.0 here); their `--max-model-len`, `--kv-cache-dtype` and prefix-caching settings are unstated where §8.1 fixes ours; and confirm whether their throughput figure is per-GPU or total across 8.
+| | KV pool (tokens) | concurrent @ 9216 tok/seq |
+|---|---|---|
+| ours (v0.29.0, GPU_MEM_UTIL=0.97) | 300,533 | 32.6 |
+| SemiAnalysis, same shape | 4,386,107 | 476 |
+
+This is the mechanism behind their concurrency sweep reaching 512 where ours stops at 32 — not a scheduling difference, they simply have far more KV cache on the same hardware. Their 1024→1024 runs report a different pool again (8,660,728 tokens), so the figure varies with configuration rather than being a fixed property of the machine.
+
+**If some of that gap is recoverable, it matters directly for scoring**: N is capped by KV capacity, the `high` operating point is N, and our high cells are the largest numbers in the submission. Worth checking whether MLA KV is being replicated across TP ranks in our configuration where theirs shards it, and what `--max-model-len` and block size they run. We have not established the cause; it is recorded here as an open lead, not a finding.
 
 ## Is the FP4 matrix path actually used?
 

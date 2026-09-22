@@ -174,40 +174,59 @@ def main():
             A(f"\nWorst-case disagreement across {len(common)} shared cells: "
               f"**{worst:.1f}%**.\n")
 
-    # External comparison: SemiAnalysis InferenceX runs the same model on the same hardware
-    # at the same TP8/EP1 layout, so parts of their grid coincide with ours exactly.
-    A("## External comparison: SemiAnalysis InferenceX\n")
-    A("Their run [28593351944](https://github.com/SemiAnalysisAI/InferenceX/actions/runs/28593351944) "
-      "(`dsv4-fp4-mi355x-vllm`) is DeepSeek-V4-Pro, FP4, MI355X, **TP8/EP1** — same model, "
-      "same hardware, same parallel layout as our `mi355x-n32-ep1` config. Verified from the "
-      "artifact names (`bmk_dsv4_{1k1k,8k1k}_fp4_vllm_tp8-ep1-...conc{4..512}`), not inferred.\n")
-    A("Two of their cells coincide with ours exactly — same shape, same concurrency:\n")
-    ep1 = data.get("N=32  v0.29 EP1")
-    mid = ep1[0].get(("8192", "1024", "mid")) if ep1 else None
-    high = ep1[0].get(("8192", "1024", "high")) if ep1 else None
-    A("| their config | our cell | ours (tok/s/GPU) | theirs |")
-    A("|---|---|---|---|")
-    A(f"| `8k1k … conc16` | 8192→1024 mid (conc 16) | {mid:,.1f} | _not retrieved_ |"
-      if mid else "| `8k1k … conc16` | 8192→1024 mid | _n/a_ | _not retrieved_ |")
-    A(f"| `8k1k … conc32` | 8192→1024 high (conc 32) | {high:,.1f} | _not retrieved_ |"
-      if high else "| `8k1k … conc32` | 8192→1024 high | _n/a_ | _not retrieved_ |")
-    A("")
-    A("**Their numbers are not filled in because GitHub requires authentication to download "
-      "workflow artifacts, even on a public repo (the API returns 401).** The values live in "
-      "the per-config `bmk_…` artifacts. To populate this table:\n")
-    A("```bash\nGITHUB_TOKEN=<token with public_repo> python3 profiling/fetch_semianalysis.py\n```\n")
-    A("**Their remaining concurrencies (64–512) have no counterpart here**, and that is a "
-      "workload difference rather than a capability one. Our two shapes both sum to exactly "
-      "9216 tokens (§4, so one N covers both), giving 300,533 / 9216 = **32.6** concurrent "
-      "sequences. Their 1k1k shape is 2048 tokens per sequence, so the same KV cache holds "
-      "**146.7** — 4.5x more, purely because the sequences are shorter. Their 8k1k shape is "
-      "also 9216 tokens, so at concurrency 64+ it exceeds what the cache admits and the "
-      "scheduler must queue: their concurrency is client-side offered load, ours is the "
-      "server-side admitted batch (`max_num_seqs`). The two axes are not interchangeable.\n")
-    A("Before treating any gap as real, check: their vLLM is a nightly and ours is pinned "
-      "v0.29.0 (worth 5.5x between v0.23.0 and v0.29.0 here); their `--max-model-len`, "
-      "`--kv-cache-dtype` and prefix-caching settings are unstated where §8.1 fixes ours; and "
-      "confirm whether their throughput figure is per-GPU or total across 8.\n")
+    # External comparison: SemiAnalysis InferenceX. Their dashboard's own API carries the
+    # numbers; docs/semianalysis-results.json is the filtered extract.
+    sa_path = ROOT / "docs" / "semianalysis-results.json"
+    if sa_path.exists():
+        sa = json.loads(sa_path.read_text())
+        rec = {(r["isl"], r["osl"], r["conc"]): r for r in sa["records"]}
+        A("## External comparison: SemiAnalysis InferenceX\n")
+        A(f"Source: `{sa['source']}` (fetched {sa['fetched']}), filtered to "
+          f"`{sa['filter']}` — i.e. the same model, hardware and TP8/EP1 layout we run.\n")
+        A("Their `8192→1024` shape matches ours exactly, at concurrencies 16 and 32 which are "
+          "our `mid` and `high` points. (Their other shape is 1024→1024; ours is 1024→8192, "
+          "so those do not compare.)\n")
+        ep8, ep1 = data.get("N=32  v0.29 EP8"), data.get("N=32  v0.29 EP1")
+        if ep8 and ep1:
+            A("| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |")
+            A("|---|---|---|---|---|---|")
+            for conc, pt in ((16, "mid"), (32, "high")):
+                r = rec.get((8192, 1024, conc))
+                if not r:
+                    continue
+                theirs = r["metrics"]["tput_per_gpu"]
+                a, b = ep8[0][("8192", "1024", pt)], ep1[0][("8192", "1024", pt)]
+                best = max(a, b)
+                A(f"| {conc} | {pt} | {theirs:,.1f} | {a:,.1f} | {b:,.1f} | "
+                  f"**{(best/theirs-1)*100:+.1f}%** |")
+            A("\nAll tok/s/GPU. **The two independent implementations agree to within 5%**, "
+              "which is the main thing this comparison establishes: our harness and theirs "
+              "measure the same hardware the same way.\n")
+            A("Caveat on the remaining gap: they run a vLLM **nightly** "
+              f"(`{(rec.get((8192,1024,32)) or {}).get('image','?')}`) where we pin v0.29.0, and "
+              "engine version was worth 5.5x between v0.23.0 and v0.29.0 on this stack. A few "
+              "percent either way is well inside that.\n")
+        # KV pool — the discrepancy that explains their concurrency range
+        r16 = rec.get((8192, 1024, 32))
+        if r16 and r16["metrics"].get("kv_cache_pool_tokens"):
+            theirs_kv = r16["metrics"]["kv_cache_pool_tokens"]
+            A("### Their KV pool is 14.6x ours — unexplained, and worth chasing\n")
+            A(f"| | KV pool (tokens) | concurrent @ 9216 tok/seq |")
+            A("|---|---|---|")
+            A(f"| ours (v0.29.0, GPU_MEM_UTIL=0.97) | 300,533 | 32.6 |")
+            A(f"| SemiAnalysis, same shape | {theirs_kv:,.0f} | {theirs_kv/9216:,.0f} |")
+            A(f"\nThis is the mechanism behind their concurrency sweep reaching 512 where ours "
+              f"stops at 32 — not a scheduling difference, they simply have far more KV cache "
+              f"on the same hardware. Their 1024→1024 runs report a different pool again "
+              f"({rec.get((1024,1024,32),{}).get('metrics',{}).get('kv_cache_pool_tokens',0):,.0f} "
+              f"tokens), so the figure varies with configuration rather than being a fixed "
+              f"property of the machine.\n")
+            A("**If some of that gap is recoverable, it matters directly for scoring**: N is "
+              "capped by KV capacity, the `high` operating point is N, and our high cells are "
+              "the largest numbers in the submission. Worth checking whether MLA KV is being "
+              "replicated across TP ranks in our configuration where theirs shards it, and "
+              "what `--max-model-len` and block size they run. We have not established the "
+              "cause; it is recorded here as an open lead, not a finding.\n")
 
     # MFMA counter probe. logs/mfma-counters.txt is the parsed rocpd output (rocprofv3
     # writes SQLite by default, so the raw run log does not carry the numbers).
