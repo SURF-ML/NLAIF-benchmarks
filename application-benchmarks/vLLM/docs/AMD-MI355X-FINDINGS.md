@@ -55,6 +55,27 @@ The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37 (4 overla
 
 Worst-case disagreement across 4 shared cells: **0.3%**.
 
+## External comparison: SemiAnalysis InferenceX
+
+Their run [28593351944](https://github.com/SemiAnalysisAI/InferenceX/actions/runs/28593351944) (`dsv4-fp4-mi355x-vllm`) is DeepSeek-V4-Pro, FP4, MI355X, **TP8/EP1** — same model, same hardware, same parallel layout as our `mi355x-n32-ep1` config. Verified from the artifact names (`bmk_dsv4_{1k1k,8k1k}_fp4_vllm_tp8-ep1-...conc{4..512}`), not inferred.
+
+Two of their cells coincide with ours exactly — same shape, same concurrency:
+
+| their config | our cell | ours (tok/s/GPU) | theirs |
+|---|---|---|---|
+| `8k1k … conc16` | 8192→1024 mid (conc 16) | 632.6 | _not retrieved_ |
+| `8k1k … conc32` | 8192→1024 high (conc 32) | 1,127.0 | _not retrieved_ |
+
+**Their numbers are not filled in because GitHub requires authentication to download workflow artifacts, even on a public repo (the API returns 401).** The values live in the per-config `bmk_…` artifacts. To populate this table:
+
+```bash
+GITHUB_TOKEN=<token with public_repo> python3 profiling/fetch_semianalysis.py
+```
+
+**Their remaining concurrencies (64–512) have no counterpart here**, and that is a workload difference rather than a capability one. Our two shapes both sum to exactly 9216 tokens (§4, so one N covers both), giving 300,533 / 9216 = **32.6** concurrent sequences. Their 1k1k shape is 2048 tokens per sequence, so the same KV cache holds **146.7** — 4.5x more, purely because the sequences are shorter. Their 8k1k shape is also 9216 tokens, so at concurrency 64+ it exceeds what the cache admits and the scheduler must queue: their concurrency is client-side offered load, ours is the server-side admitted batch (`max_num_seqs`). The two axes are not interchangeable.
+
+Before treating any gap as real, check: their vLLM is a nightly and ours is pinned v0.29.0 (worth 5.5x between v0.23.0 and v0.29.0 here); their `--max-model-len`, `--kv-cache-dtype` and prefix-caching settings are unstated where §8.1 fixes ours; and confirm whether their throughput figure is per-GPU or total across 8.
+
 ## Is the FP4 matrix path actually used?
 
 gfx950 separates 8-bit from 4/6-bit matrix ops in hardware (`SQ_INSTS_VALU_MFMA_MOPS_F8` vs `..._F6F4`), so this is measured, not inferred. A control run confirms the counters register at all — without it a zero F6F4 would be ambiguous between "no 4-bit ops" and "collection broken".
