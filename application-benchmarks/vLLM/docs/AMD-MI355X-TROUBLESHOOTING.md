@@ -282,7 +282,37 @@ and nothing for the benchmark spec to permit — it is an engine limitation, not
   cache memory` a few seconds earlier and can then die during graph capture. Wait on the
   error strings too, or a failure looks like a hang.
 
-## 10. Smaller things
+## 10. AMD's FP4 checkpoints do not help, on v0.29.0 or v0.30.0
+
+`amd/DeepSeek-V4-Pro-MXFP4` and `amd/DeepSeek-V4-Pro-NVFP4` both declare FP4 *activations*
+(`global_quant_config.input_tensors: {dtype: fp4}`), unlike the base checkpoint's FP8. That
+makes them look like the route to FP4 matrix compute. Measured on both engine versions:
+
+| checkpoint | config | result |
+|---|---|---|
+| MXFP4 | EP8 (the benchmark's own) | **fails to load** — `assert param_data.shape == loaded_weight.shape` |
+| MXFP4 | EP off + shared-expert fusion | loads; serves **W4A8** (`float8_e4m3fn x float4_e2m1fn_x2`) |
+| NVFP4 | EP8 | loads; **emulated** — `Nvfp4QuantizationEmulationTritonExperts ... dequantize weights on the fly` |
+
+The load failure is the shared expert: the checkpoint ships it FP4-packed `[3072, 3584]`,
+vLLM builds a dense `DeepseekV4MLP` and allocates `[3072, 7168]` via the DeepSeek-native FP8
+path. Only shared-expert fusion consumes the FP4 layout, and
+`_fuse_shared_experts_enabled()` requires `not enable_expert_parallel` — so fusion and EP are
+mutually exclusive, and the benchmark uses EP.
+
+Even when it loads, the activation declaration is ignored: `DeepseekV4FP8Config.from_config`
+discards the entire Quark schema (keeping only `exclude`), the ROCm DeepSeek-V4 priority list
+is `[AITER_MXFP4_BF16, TRITON_UNFUSED]` with no W4A4 entry, and `aiter_mxfp4_mxfp4` is not an
+accepted `--moe-backend` value. All four facts are identical in v0.29.0 and v0.30.0.
+
+NVFP4 additionally reports only 31.51x KV concurrency, below a declared N=32.
+
+**Check reachability in the source before moving weights.** All three outcomes above were
+predicted in about five minutes by reading `from_config`, the priority list and the
+`--moe-backend` choices. An earlier round of this same question cost 864 GB of eviction and
+804 GB of download to reach the same conclusion.
+
+## 11. Smaller things
 
 - **`hf` CLI**: `~/.local/bin/hf` is a broken symlink to a nonexistent path. The working
   binary is `/home/amd/.hf-cli/venv/bin/hf`.
