@@ -216,7 +216,41 @@ count, not the exit status:
 find results/<run> -name summary.json | wc -l    # expect 6
 ```
 
-## 8. Smaller things
+## 8. /dev/shm is not durable — an 806 GB checkpoint vanished overnight
+
+**Symptom.** A sweep launched at 02:50 died instantly on every measurement:
+
+```
+huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached
+snapshot folder for the specified revision on the local disk and outgoing traffic
+has been disabled.
+```
+
+`/dev/shm/hf_hub` was simply gone. The weights were verified present and serving at 17:22
+the previous evening — two full sweeps ran off them — and by 02:50 `/dev/shm` was back to
+1.5 TiB free on **both** nodes.
+
+**Not a reboot**: `uptime` showed 3 days. `systemd-tmpfiles-clean.timer` last fired 18 h
+earlier, i.e. *before* the checkpoint was restored, so that is not the mechanism either.
+Cause still unidentified — but the operational fact stands: on these nodes `/dev/shm` can
+be cleared out from under a long-running campaign, simultaneously across nodes.
+
+**Implications.**
+
+- Do not treat an 800 GB `/dev/shm` checkpoint as durable across a multi-day campaign.
+  Budget for an ~18 min re-download (at ~750–900 MiB/s) or stage the weights on real disk
+  and accept the slower load. `/` had 564 GB free here — not enough for this checkpoint,
+  so that trade-off needs planning, not improvising.
+- Verify the weights resolve *before* launching a sweep, rather than discovering it six
+  measurements later:
+  ```bash
+  ls /dev/shm/hf_hub/hub/models--deepseek-ai--DeepSeek-V4-Pro/snapshots/*/ | wc -l   # 74
+  ```
+- This interacts badly with §5: the worker does not notice the engine died, so each of the
+  six measurements waits out the full 1800 s `--serve-timeout`. A missing checkpoint costs
+  three hours of nothing before the driver reports failure.
+
+## 9. Smaller things
 
 - **`hf` CLI**: `~/.local/bin/hf` is a broken symlink to a nonexistent path. The working
   binary is `/home/amd/.hf-cli/venv/bin/hf`.

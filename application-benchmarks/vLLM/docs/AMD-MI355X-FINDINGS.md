@@ -42,6 +42,19 @@ Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman, no s
 
 Envelope is **+4.9%** over the EP8 baseline and +2.7% over EP1 alone.
 
+## Cross-node reproducibility
+
+The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37 (4 overlapping cells; the gpu-37 repeat was cut short by a session teardown before the two `high` cells). This is what establishes that the prefill-mid regression is a real effect rather than run-to-run variance.
+
+| shape | point | gpu-13 | gpu-37 | spread |
+|---|---|---|---|---|
+| 8192→1024 | low | 72.0 | 71.9 | 0.0% |
+| 8192→1024 | mid | 632.6 | 631.5 | 0.2% |
+| 1024→8192 | low | 9.3 | 9.3 | 0.1% |
+| 1024→8192 | mid | 115.5 | 115.9 | 0.3% |
+
+Worst-case disagreement across 4 shared cells: **0.3%**.
+
 ## Is the FP4 matrix path actually used?
 
 gfx950 separates 8-bit from 4/6-bit matrix ops in hardware (`SQ_INSTS_VALU_MFMA_MOPS_F8` vs `..._F6F4`), so this is measured, not inferred. A control run confirms the counters register at all — without it a zero F6F4 would be ambiguous between "no 4-bit ops" and "collection broken".

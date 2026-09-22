@@ -143,7 +143,10 @@ def main():
     # Cross-node reproducibility, when the same config has been run on both nodes.
     import glob as _g
     g13 = _g.glob(str(ROOT / "results/*gpu13_amd-mi355x-n32-ep1/scores.csv"))
-    g37 = [f for f in _g.glob(str(ROOT / "results/*_amd-mi355x-n32-ep1/scores.csv"))
+    # The gpu-37 repeat was cut short by a session teardown, so accept the PARTIAL directory
+    # too — its cells are valid measurements, and the shared-cell comparison is what matters
+    # here. The table below states how many cells overlap.
+    g37 = [f for f in _g.glob(str(ROOT / "results/*amd-mi355x-n32-ep1*/scores.csv"))
            if "gpu13" not in f]
     if g13 and g37:
         x = {(r["input_len"], r["output_len"], r["point"]): float(r["tokens_per_gpu"])
@@ -153,9 +156,10 @@ def main():
         common = [k for k in x if k in y]
         if common:
             A("## Cross-node reproducibility\n")
-            A("The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37. This "
-              "is what establishes that the prefill-mid regression is a real effect rather "
-              "than run-to-run variance.\n")
+            A(f"The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37 "
+              f"({len(common)} overlapping cells; the gpu-37 repeat was cut short by a session "
+              f"teardown before the two `high` cells). This is what establishes that the "
+              f"prefill-mid regression is a real effect rather than run-to-run variance.\n")
             A("| shape | point | gpu-13 | gpu-37 | spread |")
             A("|---|---|---|---|---|")
             worst = 0.0
