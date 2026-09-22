@@ -225,6 +225,19 @@ CLUSTERS = {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
+    # v0.30.0, EP8 and EP1, for a three-version comparison (v0.23.0 / v0.29.0 / v0.30.0) on
+    # the same six cells. NOT SUBMITTABLE — §9 ruling 10 pins the version.
+    "amd/mi355x-n32-v030": {
+        "deepseek-v4-pro": {
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+        },
+    },
+    "amd/mi355x-n32-v030-ep1": {
+        "deepseek-v4-pro": {
+            "extra": {"enable-expert-parallel": False},
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+        },
+    },
     # v0.23.0 with expert parallelism OFF. Single-variable change from mi355x-n32-v023 (which
     # ran EP8 and came out 5.5x slower than v0.29.0): isolates whether that deficit was the MoE
     # layout rather than kernel maturity. Also the closest analogue to SemiAnalysis's

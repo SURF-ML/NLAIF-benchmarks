@@ -13,18 +13,52 @@ Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman, no s
 | N=32  v0.29 EP1 | v0.29.0 | 1 | W4A8 | 32.43x | yes |
 | N=32  v0.23 EP8 | v0.23.0 | 8 | W4A4 | 36.17x | no (§9 r10) |
 | N=32  v0.23 EP1 | v0.23.0 | 1 | W4A4 | 29.38x ⚠ below declared N | no (§9 r10) |
+| N=32  v0.30 EP8 | v0.30.0 | 8 | W4A8 | 32.85x | no (§9 r10) |
+| N=32  v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.70x | no (§9 r10) |
+
+## Engine version comparison
+
+Same six cells, same node, same TP8 layout and N=32 @ GPU_MEM_UTIL=0.97 — only the vLLM version differs. v0.23.0 runs the MoE as W4A4 (its older code inferred activation precision from weight precision); v0.29.0 and v0.30.0 run W4A8.
+
+| version | mean tok/s/GPU | vs v0.29.0 |
+|---|---|---|
+| v0.23.0 | 63.9 | -81.9% |
+| v0.29.0 | 352.9 | +0.0% |
+| v0.30.0 | 375.2 | +6.3% |
+
+### What the version pin costs
+
+§9 ruling 10 pins v0.29.0. Measured against the best configuration on each version:
+
+| | EP8 | EP1 | best |
+|---|---|---|---|
+| v0.29.0 (pinned) | 352.9 | 360.4 | **360.4** |
+| v0.30.0 | 375.2 | 406.1 | **406.1** |
+
+The pin costs **12.7%** on this hardware — and more than the EP8-only comparison suggests, because v0.30.0 also repairs an EP1 regression (below).
+
+That is a smaller number than the v0.23.0 comparison implies, and it argues the pin is roughly well-placed rather than badly stale: v0.23.0 -> v0.29.0 was 5.5x, v0.29.0 -> v0.30.0 is single digits. Kernel maturity arrived between those releases and is now incremental.
+
+### The EP1 prefill-mid regression is version-specific
+
+| version | EP8 | EP1 | EP1 vs EP8 |
+|---|---|---|---|
+| v0.29.0 | 690.7 | 632.6 | **-8.4%** |
+| v0.30.0 | 725.2 | 791.7 | **+9.2%** |
+
+The 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced across two nodes to within 0.2%. On v0.30.0 the same cell gains instead. So EP1 is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs, and the best-of-both envelope recommended below is an artifact of the pinned version rather than a property of the layouts.
 
 ## tok/s/GPU by cell
 
-| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.29 EP1 | N=32  v0.23 EP8 | N=32  v0.23 EP1 |
-|---|---|---|---|---|---|---|
-| 8192→1024 | low | 67.9 | 67.9 | 72.0 | 25.2 | 25.6 |
-| 8192→1024 | mid | 411.2 | 690.7 | 632.6 | 112.5 | 112.3 |
-| 8192→1024 | high | 691.5 | 1,052.7 | 1,127.0 | 112.4 | 112.5 |
-| 1024→8192 | low | 8.8 | 8.7 | 9.3 | 3.3 | 3.4 |
-| 1024→8192 | mid | 59.5 | 107.4 | 115.5 | 45.7 | 45.8 |
-| 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 |
-| **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** |
+| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.29 EP1 | N=32  v0.23 EP8 | N=32  v0.23 EP1 | N=32  v0.30 EP8 | N=32  v0.30 EP1 |
+|---|---|---|---|---|---|---|---|---|
+| 8192→1024 | low | 67.9 | 67.9 | 72.0 | 25.2 | 25.6 | 69.8 | 74.7 |
+| 8192→1024 | mid | 411.2 | 690.7 | 632.6 | 112.5 | 112.3 | 725.2 | 791.7 |
+| 8192→1024 | high | 691.5 | 1,052.7 | 1,127.0 | 112.4 | 112.5 | 1,137.3 | 1,216.5 |
+| 1024→8192 | low | 8.8 | 8.7 | 9.3 | 3.3 | 3.4 | 9.0 | 9.6 |
+| 1024→8192 | mid | 59.5 | 107.4 | 115.5 | 45.7 | 45.8 | 109.9 | 124.8 |
+| 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 | 200.1 | 219.2 |
+| **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** | **375.2** | **406.1** |
 
 ## Submission recommendation: submit both v0.29.0 layouts
 

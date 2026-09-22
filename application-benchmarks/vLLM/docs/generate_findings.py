@@ -17,6 +17,8 @@ RUNS = [
     ("N=32  v0.29 EP1", "results/*_amd-mi355x-n32-ep1",      "v0.29.0", "1", "W4A8", "yes"),
     ("N=32  v0.23 EP8", "results/*_amd-mi355x-n32-v023",     "v0.23.0", "8", "W4A4", "no (§9 r10)"),
     ("N=32  v0.23 EP1", "results/*_amd-mi355x-n32-v023-ep1", "v0.23.0", "1", "W4A4", "no (§9 r10)"),
+    ("N=32  v0.30 EP8", "results/*_amd-mi355x-n32-v030",     "v0.30.0", "8", "W4A8", "no (§9 r10)"),
+    ("N=32  v0.30 EP1", "results/*_amd-mi355x-n32-v030-ep1", "v0.30.0", "1", "W4A8", "no (§9 r10)"),
 ]
 
 def load(pattern):
@@ -89,6 +91,56 @@ def main():
             warn = " ⚠ below declared N"
         A(f"| {label} | {eng} | {ep} | {prec} | {kvs}{warn} | {sub} |")
     A("")
+
+    A("## Engine version comparison\n")
+    A("Same six cells, same node, same TP8 layout and N=32 @ GPU_MEM_UTIL=0.97 — only the "
+      "vLLM version differs. v0.23.0 runs the MoE as W4A4 (its older code inferred activation "
+      "precision from weight precision); v0.29.0 and v0.30.0 run W4A8.\n")
+    vers = [("v0.23.0", "N=32  v0.23 EP8"), ("v0.29.0", "N=32  v0.29 EP8"),
+            ("v0.30.0", "N=32  v0.30 EP8")]
+    have = [(v, k) for v, k in vers if k in data]
+    if len(have) > 1:
+        A("| version | mean tok/s/GPU | vs v0.29.0 |")
+        A("|---|---|---|")
+        base = sum(data["N=32  v0.29 EP8"][0].values()) / 6 if "N=32  v0.29 EP8" in data else None
+        for v, k in have:
+            m = sum(data[k][0].values()) / len(data[k][0])
+            rel = f"{(m/base-1)*100:+.1f}%" if base else "—"
+            A(f"| {v} | {m:,.1f} | {rel} |")
+        A("")
+
+    # What the version pin costs — the number to put beside §9 ruling 10.
+    a = data.get("N=32  v0.29 EP8"); b = data.get("N=32  v0.29 EP1")
+    c = data.get("N=32  v0.30 EP8"); d = data.get("N=32  v0.30 EP1")
+    if a and d:
+        m = lambda x: sum(x[0].values()) / len(x[0])
+        A("### What the version pin costs\n")
+        A("§9 ruling 10 pins v0.29.0. Measured against the best configuration on each version:\n")
+        A("| | EP8 | EP1 | best |")
+        A("|---|---|---|---|")
+        A(f"| v0.29.0 (pinned) | {m(a):,.1f} | {m(b):,.1f} | **{max(m(a),m(b)):,.1f}** |")
+        A(f"| v0.30.0 | {m(c):,.1f} | {m(d):,.1f} | **{max(m(c),m(d)):,.1f}** |")
+        A(f"\nThe pin costs **{(max(m(c),m(d))/max(m(a),m(b))-1)*100:.1f}%** on this hardware — "
+          f"and more than the EP8-only comparison suggests, because v0.30.0 also repairs an "
+          f"EP1 regression (below).\n")
+        A("That is a smaller number than the v0.23.0 comparison implies, and it argues the pin "
+          "is roughly well-placed rather than badly stale: v0.23.0 -> v0.29.0 was 5.5x, "
+          "v0.29.0 -> v0.30.0 is single digits. Kernel maturity arrived between those releases "
+          "and is now incremental.\n")
+        # the EP1 regression, version-specific
+        k = ("8192", "1024", "mid")
+        if all(k in x[0] for x in (a, b, c, d)):
+            A("### The EP1 prefill-mid regression is version-specific\n")
+            A("| version | EP8 | EP1 | EP1 vs EP8 |")
+            A("|---|---|---|---|")
+            for ver, x, y in (("v0.29.0", a, b), ("v0.30.0", c, d)):
+                A(f"| {ver} | {x[0][k]:,.1f} | {y[0][k]:,.1f} | "
+                  f"**{(y[0][k]/x[0][k]-1)*100:+.1f}%** |")
+            A("\nThe 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced "
+              "across two nodes to within 0.2%. On v0.30.0 the same cell gains instead. So EP1 "
+              "is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs, and "
+              "the best-of-both envelope recommended below is an artifact of the pinned version "
+              "rather than a property of the layouts.\n")
 
     A("## tok/s/GPU by cell\n")
     hdr = "| shape | point | " + " | ".join(l for l, *_ in RUNS if l in data) + " |"
