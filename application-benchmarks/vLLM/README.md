@@ -19,6 +19,7 @@ the organisers before deviating from any stated requirement.
 8. [Rules](#8-rules)
 9. [Edge-Case Rulings](#9-edge-case-rulings)
 10. [Flag Reference](#10-flag-reference)
+- [Appendix A — Draft: vendor FP4 activation quantisation (not in force)](#appendix-a--draft-vendor-fp4-activation-quantisation-not-in-force)
 
 ---
 
@@ -608,3 +609,102 @@ Condensed classification of all evaluated parameters. This document governs in a
 | `--speculative-config` | ⛔ | Hardware-speed-dependent acceptance rate. |
 | `--performance-mode` | ⛔ | Sets different parameters per platform; not auditable. |
 
+---
+
+## Appendix A — Draft: vendor FP4 activation quantisation (not in force)
+
+> **This appendix is a proposal and has no effect.** [§8.5](#85-prohibited) continues to
+> prohibit additional activation quantisation. It records how such a permission would be scoped
+> if adopted, so the wording is ready when the preconditions below are met.
+
+### A.1 Proposed rule
+
+> A vendor may quantise **activations** to FP4 for the **routed-expert GEMMs only** — tensors
+> matching `*.ffn.experts.*`.
+>
+> **Every tensor outside `*.ffn.experts.*` must keep exactly the dtype of the corresponding tensor
+> in the base `deepseek-ai/DeepSeek-V4-Pro` checkpoint**, for both weights and activations.
+>
+> Activation scales must be computed **dynamically**. Static or calibrated activation scales are
+> prohibited.
+>
+> The FP4 encoding must be one of:
+> - **MXFP4** — block of 32 values, E8M0 (power-of-two) scale; or
+> - **NVFP4** — block of 16 values, FP8-E4M3 scale, plus a per-tensor FP32 scale.
+
+The normative clause is the one in bold. The table below is **informative only**: it was generated
+from the checkpoint's safetensors headers (layer 10) and must be regenerated, not hand-edited, if
+the checkpoint changes.
+
+| tensor pattern | base-checkpoint dtype | under this rule |
+|---|---|---|
+| `ffn.experts.*` | FP4 packed (`I8`) + `F8_E8M0` scale | weights unchanged; **activations FP4 permitted** |
+| `ffn.shared_experts.{w1,w2,w3}` | `F8_E4M3` | unchanged |
+| `attn.{wq_a, wq_b, wkv, wo_a, wo_b}`, `attn.indexer.wq_b` | `F8_E4M3` | unchanged |
+| `attn.compressor.*`, `attn.indexer.compressor.*`, `attn.indexer.weights_proj` | `BF16` | unchanged |
+| `ffn.gate`, `head`, all `*_norm` | `BF16` | unchanged |
+
+### A.2 Why this boundary
+
+- **Scope by tensor pattern, not by prose.** "The experts" is ambiguous about the shared expert,
+  and the two published vendor builds already disagree on it: `amd/DeepSeek-V4-Pro-MXFP4`
+  quantises `ffn.shared_experts.*` to FP4, `nvidia/DeepSeek-V4-Pro-NVFP4` leaves it FP8. That is
+  a quantisation-policy difference, not a hardware one.
+- **The gain is bounded.** From the checkpoint's tensor shapes, routed experts are 51.3% of
+  per-token GEMM FLOPs, attention projections 38.8%, the shared expert 8.6%. At a nominal 2x FP4
+  rate the theoretical ceiling is **~1.34x** with routed experts only, **~1.42x** if the shared
+  expert were included. Both figures count GEMM FLOPs only — attention score computation is
+  excluded — so realised gains will be lower.
+- **Dynamic scaling** removes calibration as a hidden lever (the published NVIDIA build uses static
+  scales, the AMD builds dynamic) and needs no calibration data to audit. Whether static scales
+  are materially faster on either platform has not been measured.
+
+### A.3 Verification
+
+A submission using this permission would supply:
+
+1. **`config.json` → `quantization_config`**, whose `exclude` / `ignore` lists define module
+   coverage. A reviewer diffs coverage against A.1.
+2. **A per-module precision map** — tensor name → weight dtype, activation dtype, scale scheme.
+3. The existing **`serve.log`** per layout, which records the selected MoE backend.
+
+Tensor dtypes can be checked independently from the safetensors headers without trusting the
+vendor. Two signals that look useful are **not** reliable and should not be required:
+
+- **The operand-dtype tuple in `serve.log`** (e.g. `'torch.float4_e2m1fn_x2',
+  'torch.float4_e2m1fn_x2'`) is only printed on AITER's "no tuned config, heuristic fallback" path.
+  A tuned configuration does not emit it.
+- **Hardware MFMA counters** (`SQ_INSTS_VALU_MFMA_MOPS_F8` vs `..._F6F4` on gfx950). A control run
+  showed the F8 and BF16 counters accurate to the digit, and an FP4xFP4 MoE registered 100% in
+  F6F4 (to within ~12% of the expected FLOP count). But which counter a *mixed* FP8xFP4 operation
+  increments was never measured, so the counters may not distinguish W4A8 from W4A4 — the exact
+  distinction an audit needs. Counter collection on a served multi-GPU engine also crashes vLLM's
+  workers.
+
+### A.4 Preconditions before adopting
+
+1. **A real accuracy gate.** §3's heading *"DeepSeek V4 Pro layout and FP4 accuracy gate"* has no
+   gate in its body. The score has no accuracy term, so without a fixed evaluation and threshold
+   this permission trades output quality for throughput undetectably.
+2. **Both platforms able to execute it.** Measured on MI355X with vLLM v0.29.0 and v0.30.0, the
+   DeepSeek-V4 ROCm path cannot reach FP4 activations by any checkpoint or flag:
+   `DeepseekV4FP8Config.from_config` discards the Quark schema that declares FP4 activations, the
+   ROCm MoE priority list is `[AITER_MXFP4_BF16, TRITON_UNFUSED]` with no W4A4 entry, and
+   `aiter_mxfp4_mxfp4` is not an accepted `--moe-backend` value. Adopting the rule before that
+   changes would create an asymmetry favouring whichever platform can execute it. Whether the CUDA
+   path reaches W4A4 for this model has **not** been verified.
+
+### A.5 Corrections to the earlier draft
+
+An earlier version of this proposal, circulated informally, contained the following errors:
+
+| earlier claim | correction |
+|---|---|
+| `*.attn.*`, including `compressor.*` and `indexer.*`, is FP8 | Wrong. The compressor and most indexer tensors are **BF16**; only `wq_a/wq_b/wkv/wo_a/wo_b` and `indexer.wq_b` are FP8. The normative clause is now "keep the base dtype", with the table derived from the checkpoint. |
+| Weights "may be re-encoded but not re-quantised" into the native FP4 format | Not a real distinction. MXFP4 -> NVFP4 changes block size and scale format, which re-quantises the values. Only MXFP4 matches the base checkpoint byte-for-byte. Removed. |
+| Hardware counters verified "accurate to the digit" and usable for audit | Only F8/BF16 were verified that closely; F6F4 to ~12%. The mixed FP8xFP4 case is unmeasured, and engine-level collection crashes vLLM. Demoted to "not reliable". |
+| The `serve.log` operand-dtype tuple proves the activation dtype | Printed only on the untuned fallback path. Replaced by a required per-module precision map. |
+| Including the shared expert raises the ceiling to "~1.42%" | Typo for **~1.42x**. |
+| Shared-expert coverage is worth "~6%" | A difference between two theoretical ceilings, not a measurement. |
+| Static scales are faster | An expectation, not measured. |
+| "NVIDIA's path may well reach W4A4" | Unverified. The leading CUDA MXFP4 backends for this model are W4A8; a `ModelOptNvFp4FusedMoE` branch for NVFP4 checkpoints may be W4A4 but was not tested. |
