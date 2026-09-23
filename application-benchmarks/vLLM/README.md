@@ -189,18 +189,24 @@ The scored configuration space per submission is:
 |-------------|--------|
 | Job scheduler | **SLURM (required).** One worker job per `(serve, bench)` pair; multi-node serves use `srun` + Ray. The orchestrator may run as a submitted job or locally with `--local` (see §5.5). |
 | Container runtime | Apptainer / Singularity, or Podman. Workers run exclusively inside the official image. |
-| Official base image | Any official vLLM image from [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) — e.g. `vllm/vllm-openai` (CUDA) or `vllm/vllm-openai-rocm` (ROCm) — at the pinned version. Images from any other source are not permitted ([§8.5](#85-prohibited)). |
+| Official base image | Any official vLLM image from [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) — e.g. `vllm/vllm-openai` (CUDA) or `vllm/vllm-openai-rocm` (ROCm) — at a stable release (see below). Images from any other source are not permitted ([§8.5](#85-prohibited)). |
 | Accelerators | NVIDIA or AMD. Single-node and multi-node (NVIDIA validated; AMD single-node validated, multi-node AMD — see §5.4). |
 | Host Python | ≥ 3.11 (orchestrator only — runs on the host for SLURM access). |
 | Model cache | A shared `HF_HOME` visible from all nodes. Download weights once before the run. |
 | Datasets | `datasets/*.jsonl` from the organisers ([§4](#4-workloads--datasets)). |
 
-The pinned vLLM version is `VLLM_VERSION` in
-[`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) — currently **`v0.29.0`**.
-Every submission must use this version; a mismatch invalidates the submission. The pin is chosen as
-the newest version that supports the full target-hardware matrix (FP4 / DeepSeek-V4 kernel support
-varies by vendor and version). Bumping it is a global decision by the organisers that invalidates
-prior submissions — do not change it unilaterally.
+**vLLM version.** Use any **stable, tagged vLLM release** (`vX.Y.Z`) that is publicly available
+at acceptance, with its official image. Nightly, release-candidate (`rc`), development and
+self-built-from-source versions are not permitted. Declare the exact version in the submission
+([§6](#6-submitting-results)).
+
+Different submissions may therefore use different releases. That is intended: the benchmark
+evaluates the hardware together with the software ecosystem that drives it ([§1](#1-overview)), and
+engine maturity is part of that ecosystem. It is also material — on MI355X, v0.29.0 to v0.30.0 was
+worth ~13% for this model, and v0.23.0 to v0.29.0 a factor of 5.5 — so choose deliberately.
+
+`VLLM_VERSION` in [`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) is only
+the default the build script uses; set it to the release you run.
 
 ### 5.2 Building the container
 
@@ -352,7 +358,7 @@ Submit, alongside `scores.csv`:
   engine actually reported ([§4](#4-workloads--datasets)).
 - A **deviations note** — any system/operational flag you changed to make the suite run on your
   platform ([§5.6](#56-when-a-run-fails)); "none" if unchanged.
-- The **container image** identity (vendor + pinned version) and confirmation that **no fixed
+- The **container image** identity (vendor + exact vLLM release, e.g. `v0.30.0`) and confirmation that **no fixed
   parameter ([§8.1](#81-fixed-parameters)) was overridden**.
 
 Optional supporting evidence (kept under `results/<timestamp>/` for audit, not required for
@@ -492,7 +498,7 @@ being evaluated alongside the hardware.
 > **ROCm: `VLLM_ROCM_USE_AITER=1` is permitted, and is required to run DeepSeek-V4-Pro at all.**
 > AITER is AMD's fused-kernel library. It ships inside the official `vllm/vllm-openai-rocm`
 > image, so enabling it installs nothing — the env var only selects a code path already present
-> at the pinned version, which is why [§8.5](#85-prohibited) and ruling 5 do not apply. It falls
+> in the release used, which is why [§8.5](#85-prohibited) and ruling 5 do not apply. It falls
 > under both *Attention backend* and *MoE & linear kernels* above (it supplies the sparse-attention
 > indexer and the mixed MoE GEMM), and under *System / operational environment*: without it vLLM
 > refuses to build the executor —
@@ -528,7 +534,7 @@ has to earn them back through throughput, so there is nothing to bound.
 
 | Parameter / method | Reason |
 |--------------------|--------|
-| A base image not from the official [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) org, or installing any model-execution package beyond the harness image's own deps | Reproducibility requires an official vLLM image at the pinned version. |
+| A base image not from the official [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) org, or installing any model-execution package beyond the harness image's own deps | Reproducibility requires an unmodified official vLLM image of a stable release. |
 | Alternative checkpoint or precision | A different checkpoint/precision is a different model ([§3](#3-models--precision-policy)). |
 | Modifying or regenerating dataset files | Frozen inputs ([§4](#4-workloads--datasets)). |
 | `--enable-prefix-caching` | Skips computation on repeated prefixes; inflates throughput. |
@@ -551,7 +557,7 @@ altering the computation or workload shape is prohibited.
    `custom-output-len`.
 4. **Speculative decoding** — prohibited; see [§8.5](#85-prohibited).
 5. **Installing extra packages or custom kernels** — prohibited; only what ships in the official
-   image at the pinned version may be used.
+   image of the stable release used may be used.
 6. **Optimising for a single operating point** — pointless; every cell is scored and normalised
    separately ([§7](#7-scoring)), so a submission strong at one point and weak at another cannot
    average well.
@@ -565,7 +571,9 @@ altering the computation or workload shape is prohibited.
    ([§8.4](#84-parallelism)); each cell takes the best. The reported cells are an envelope and need
    not all come from one layout, so a submission is not required to be a single deployable
    configuration.
-10. **A different vLLM version than the pinned one** — invalid; all submissions use the same version.
+10. **A vLLM version other than a stable release available at acceptance** — invalid. Nightly,
+    release-candidate and development builds are not permitted. Different submissions may use
+    different stable releases; the version used must be declared ([§6](#6-submitting-results)).
 
 Configurations not addressed here are **prohibited by default**. Contact the organisers before
 proceeding with anything not explicitly sanctioned.
@@ -599,3 +607,4 @@ Condensed classification of all evaluated parameters. This document governs in a
 | `--data-parallel-size` | — | Outside the scored configuration (scale with TP/PP). |
 | `--speculative-config` | ⛔ | Hardware-speed-dependent acceptance rate. |
 | `--performance-mode` | ⛔ | Sets different parameters per platform; not auditable. |
+
