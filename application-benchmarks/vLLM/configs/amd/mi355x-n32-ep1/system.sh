@@ -1,10 +1,10 @@
-# Pinned v0.29.0, N=32 @ GPU_MEM_UTIL=0.97, but expert parallelism OFF (TP8 / EP1).
+# v0.29.0, N=32 @ GPU_MEM_UTIL=0.97, but expert parallelism OFF (TP8 / EP1).
 #
 # Single-variable change from ../mi355x-n32: same image, same checkpoint, same layout, same N —
 # only --enable-expert-parallel is dropped.
 #
 # THIS ONE IS SUBMITTABLE. §8.4 lists --enable-expert-parallel as Tunable ("typically required
-# for this MoE model", but tunable), and the engine version is the pinned one. So if EP1 scores
+# for this MoE model", but tunable), and v0.29.0 is a stable release. So if EP1 scores
 # higher it is a legitimate submission, unlike the v0.23.0 and W4A4 probes.
 #
 # Motivation: SemiAnalysis's InferenceX recipe for this model on this hardware

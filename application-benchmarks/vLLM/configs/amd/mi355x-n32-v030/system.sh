@@ -1,8 +1,9 @@
 # vLLM v0.30.0 on the same node, layout and N=32 @ 0.97 envelope as ../mi355x-n32.
 # Only the engine differs, so any delta is attributable to the version.
 #
-# NOT SUBMITTABLE as things stand: README §9 ruling 10 pins the version. This exists to test
-# whether the pin is what caps our KV pool. v0.29.0 gives 300,533 KV tokens (575.9 KiB/token,
+# SUBMITTABLE: any stable vLLM release available at acceptance is permitted (README §5.1,
+# ruling 10), and v0.30.0 serves the MoE as W4A8 like v0.29.0. Originally added to test
+# whether the engine version was what capped our KV pool (it was not — 0.7%). v0.29.0 gives 300,533 KV tokens (575.9 KiB/token,
 # 16.8x the ~34.3 KiB/token the MLA tensors imply); SemiAnalysis report 4,386,107 (~39.5
 # KiB/token) on a nightly for the same model and hardware. The v0.30.0 release notes name two
 # candidates for this model:

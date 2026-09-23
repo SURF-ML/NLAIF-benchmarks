@@ -9,12 +9,12 @@ Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman, no s
 | run | engine | EP | MoE precision | reported KV capacity | submittable |
 |---|---|:--:|---|---|---|
 | N=16  v0.29 EP8 | v0.29.0 | 8 | W4A8 | 28.72x | yes |
-| N=32  v0.29 EP8 | v0.29.0 | 8 | W4A8 | 32.61x | yes (submission) |
+| N=32  v0.29 EP8 | v0.29.0 | 8 | W4A8 | 32.61x | yes |
 | N=32  v0.29 EP1 | v0.29.0 | 1 | W4A8 | 32.43x | yes |
-| N=32  v0.23 EP8 | v0.23.0 | 8 | W4A4 | 36.17x | no (§9 r10) |
-| N=32  v0.23 EP1 | v0.23.0 | 1 | W4A4 | 29.38x ⚠ below declared N | no (§9 r10) |
-| N=32  v0.30 EP8 | v0.30.0 | 8 | W4A8 | 32.85x | no (§9 r10) |
-| N=32  v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.70x | no (§9 r10) |
+| N=32  v0.23 EP8 | v0.23.0 | 8 | W4A4 | 36.17x | no — W4A4 (§8.5) |
+| N=32  v0.23 EP1 | v0.23.0 | 1 | W4A4 | 29.38x ⚠ below declared N | no — W4A4 (§8.5) |
+| N=32  v0.30 EP8 | v0.30.0 | 8 | W4A8 | 32.85x | yes |
+| N=32  v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.70x | yes (best) |
 
 ## Engine version comparison
 
@@ -26,18 +26,16 @@ Same six cells, same node, same TP8 layout and N=32 @ GPU_MEM_UTIL=0.97 — only
 | v0.29.0 | 352.9 | +0.0% |
 | v0.30.0 | 375.2 | +6.3% |
 
-### What the version pin costs
+### What the release choice is worth
 
-§9 ruling 10 pins v0.29.0. Measured against the best configuration on each version:
+Any stable vLLM release available at acceptance is permitted (§5.1, ruling 10), so the engine version is a vendor choice. Best configuration on each release:
 
 | | EP8 | EP1 | best |
 |---|---|---|---|
-| v0.29.0 (pinned) | 352.9 | 360.4 | **360.4** |
+| v0.29.0 | 352.9 | 360.4 | **360.4** |
 | v0.30.0 | 375.2 | 406.1 | **406.1** |
 
-The pin costs **12.7%** on this hardware — and more than the EP8-only comparison suggests, because v0.30.0 also repairs an EP1 regression (below).
-
-That is a smaller number than the v0.23.0 comparison implies, and it argues the pin is roughly well-placed rather than badly stale: v0.23.0 -> v0.29.0 was 5.5x, v0.29.0 -> v0.30.0 is single digits. Kernel maturity arrived between those releases and is now incremental.
+v0.30.0 is worth **12.7%** over v0.29.0 best-to-best — more than the EP8-only comparison suggests, because v0.30.0 also repairs an EP1 regression (below). v0.23.0 is not a candidate on precision grounds: it runs the MoE as W4A4, which §8.5 prohibits.
 
 ### The EP1 prefill-mid regression is version-specific
 
@@ -46,7 +44,7 @@ That is a smaller number than the v0.23.0 comparison implies, and it argues the 
 | v0.29.0 | 690.7 | 632.6 | **-8.4%** |
 | v0.30.0 | 725.2 | 791.7 | **+9.2%** |
 
-The 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced across two nodes to within 0.2%. On v0.30.0 the same cell gains instead. So EP1 is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs, and the best-of-both envelope recommended below is an artifact of the pinned version rather than a property of the layouts.
+The 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced across two nodes to within 0.2%. On v0.30.0 the same cell gains instead. So EP1 is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs. Reproduced on v0.30.0 too: gpu-13 791.7, gpu-37 794.1, a 0.3% spread.
 
 ## tok/s/GPU by cell
 
@@ -60,21 +58,21 @@ The 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced acros
 | 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 | 200.1 | 219.2 |
 | **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** | **375.2** | **406.1** |
 
-## Submission recommendation: submit both v0.29.0 layouts
+## Submission recommendation
 
-§9 ruling 9 credits each cell to the best layout, and the reported cells need not all come from one configuration. EP8 and EP1 are both legal on the pinned engine (§8.4 makes `--enable-expert-parallel` tunable) and N=32 is honest in both, so the envelope of the two is itself a legal submission and beats either alone.
+Submittable here means a stable vLLM release and W4A8 MoE precision. §9 ruling 9 credits each cell to the best configuration, so the envelope below is itself a legal submission.
 
-| shape | point | EP8 | EP1 | best |
-|---|---|---|---|---|
-| 8192→1024 | low | 67.9 | 72.0 | **72.0** (EP1) |
-| 8192→1024 | mid | 690.7 | 632.6 | **690.7** (EP8) |
-| 8192→1024 | high | 1,052.7 | 1,127.0 | **1,127.0** (EP1) |
-| 1024→8192 | low | 8.7 | 9.3 | **9.3** (EP1) |
-| 1024→8192 | mid | 107.4 | 115.5 | **115.5** (EP1) |
-| 1024→8192 | high | 190.1 | 206.2 | **206.2** (EP1) |
-| **mean** | | 352.9 | 360.4 | **370.1** |
+| shape | point | best | from |
+|---|---|---|---|
+| 8192→1024 | low | **74.7** | N=32  v0.30 EP1 |
+| 8192→1024 | mid | **791.7** | N=32  v0.30 EP1 |
+| 8192→1024 | high | **1,216.5** | N=32  v0.30 EP1 |
+| 1024→8192 | low | **9.6** | N=32  v0.30 EP1 |
+| 1024→8192 | mid | **124.8** | N=32  v0.30 EP1 |
+| 1024→8192 | high | **219.2** | N=32  v0.30 EP1 |
+| **mean** | | **406.1** | |
 
-Envelope is **+4.9%** over the EP8 baseline and +2.7% over EP1 alone.
+**N=32  v0.30 EP1 wins every cell**, so no envelope is needed — submit that single configuration. +15.1% over the original v0.29.0 EP8 baseline.
 
 ## Cross-node reproducibility
 

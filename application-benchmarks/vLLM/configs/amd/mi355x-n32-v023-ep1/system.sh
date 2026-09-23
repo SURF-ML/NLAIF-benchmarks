@@ -14,8 +14,9 @@
 # Also the closest analogue to the SemiAnalysis InferenceX config (dsv4-fp4-mi355x-vllm: TP8,
 # EP1, base checkpoint, vllm-openai-rocm v0.22.0), which is worth a sanity comparison.
 #
-# NOT SUBMITTABLE: README §9 ruling 10 pins the vLLM version. EP itself IS tunable (§8.4), so an
-# EP1 variant on the *pinned* v0.29.0 would be submittable — that is a separate config.
+# NOT SUBMITTABLE: v0.23.0 runs the MoE as W4A4, which §8.5 prohibits. (The version itself is
+# allowed — any stable release available at acceptance is.) EP is tunable (§8.4); the
+# submittable EP1 variants are ../mi355x-n32-ep1 (v0.29.0) and ../mi355x-n32-v030-ep1 (v0.30.0).
 #
 # shellcheck disable=SC1090
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../mi355x-n32-v023" && pwd)/system.sh"

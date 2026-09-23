@@ -2,9 +2,10 @@
 # N=32 @ GPU_MEM_UTIL=0.97 envelope as ../mi355x-n32 — the ONLY difference is the engine
 # version, so any delta is attributable to vLLM itself.
 #
-# NOT SUBMITTABLE. README §9 ruling 10: "A different vLLM version than the pinned one —
-# invalid; all submissions use the same version." This config exists to measure how much
-# of the result is the engine rather than the hardware; it is not a scored configuration.
+# NOT SUBMITTABLE, on precision grounds: v0.23.0 is a stable release (so ruling 10 allows it),
+# but it runs the MoE as W4A4 — its older code infers activation precision from weight
+# precision — and §8.5 prohibits additional activation quantisation. This config exists to
+# measure how much of the result is the engine rather than the hardware.
 #
 # Build the image first:
 #   cd containers && BUILDER=podman GPU_VENDOR=amd VLLM_VERSION=v0.23.0 \

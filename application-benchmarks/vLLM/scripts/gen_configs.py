@@ -216,9 +216,9 @@ CLUSTERS = {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
-    # Pinned v0.29.0 with expert parallelism OFF (TP8/EP1) — the layout SemiAnalysis's
+    # v0.29.0 with expert parallelism OFF (TP8/EP1) — the layout SemiAnalysis's
     # dsv4-fp4-mi355x recipe uses. SUBMITTABLE: §8.4 makes --enable-expert-parallel tunable and
-    # the engine is the pinned version, so this is a legitimate alternative envelope.
+    # v0.29.0 is a stable release, so this is a legitimate alternative envelope.
     "amd/mi355x-n32-ep1": {
         "deepseek-v4-pro": {
             "extra": {"enable-expert-parallel": False},
@@ -226,7 +226,7 @@ CLUSTERS = {
         },
     },
     # v0.30.0, EP8 and EP1, for a three-version comparison (v0.23.0 / v0.29.0 / v0.30.0) on
-    # the same six cells. NOT SUBMITTABLE — §9 ruling 10 pins the version.
+    # the same six cells. SUBMITTABLE — any stable release available at acceptance is allowed.
     "amd/mi355x-n32-v030": {
         "deepseek-v4-pro": {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
@@ -241,16 +241,16 @@ CLUSTERS = {
     # v0.23.0 with expert parallelism OFF. Single-variable change from mi355x-n32-v023 (which
     # ran EP8 and came out 5.5x slower than v0.29.0): isolates whether that deficit was the MoE
     # layout rather than kernel maturity. Also the closest analogue to SemiAnalysis's
-    # dsv4-fp4-mi355x recipe (TP8/EP1). NOT SUBMITTABLE — version is pinned by §9 ruling 10.
+    # dsv4-fp4-mi355x recipe (TP8/EP1). NOT SUBMITTABLE — v0.23.0 runs W4A4, barred by §8.5.
     "amd/mi355x-n32-v023-ep1": {
         "deepseek-v4-pro": {
             "extra": {"enable-expert-parallel": False},
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
         },
     },
-    # Identical to mi355x-n32 except for the engine version (v0.23.0 vs the pinned v0.29.0),
-    # so the delta isolates vLLM itself. NOT SUBMITTABLE — README §9 ruling 10 invalidates a
-    # submission on a different version; see that cluster's system.sh.
+    # Identical to mi355x-n32 except for the engine version (v0.23.0 vs v0.29.0),
+    # so the delta isolates vLLM itself. NOT SUBMITTABLE — v0.23.0 runs the MoE as W4A4, which
+    # §8.5 prohibits (the version itself is allowed); see that cluster's system.sh.
     "amd/mi355x-n32-v023": {
         "deepseek-v4-pro": {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],

@@ -1,4 +1,4 @@
-# W4A4 probe: amd/DeepSeek-V4-Pro-MXFP4 on the pinned v0.29.0 engine.
+# W4A4 probe: amd/DeepSeek-V4-Pro-MXFP4 on the v0.29.0 engine.
 #
 # Same node, same TP8 layout, same N=32 @ GPU_MEM_UTIL=0.97 envelope and same engine as
 # ../mi355x-n32 — the ONLY difference is the checkpoint, so the delta isolates activation

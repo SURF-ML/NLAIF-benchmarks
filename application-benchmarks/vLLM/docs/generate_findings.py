@@ -13,12 +13,12 @@ POINTS = ["low", "mid", "high"]
 # (label, results-dir glob, engine, EP, precision, submittable)
 RUNS = [
     ("N=16  v0.29 EP8", "results/*_amd-mi355x",              "v0.29.0", "8", "W4A8", "yes"),
-    ("N=32  v0.29 EP8", "results/*_amd-mi355x-n32",          "v0.29.0", "8", "W4A8", "yes (submission)"),
+    ("N=32  v0.29 EP8", "results/*_amd-mi355x-n32",          "v0.29.0", "8", "W4A8", "yes"),
     ("N=32  v0.29 EP1", "results/*_amd-mi355x-n32-ep1",      "v0.29.0", "1", "W4A8", "yes"),
-    ("N=32  v0.23 EP8", "results/*_amd-mi355x-n32-v023",     "v0.23.0", "8", "W4A4", "no (§9 r10)"),
-    ("N=32  v0.23 EP1", "results/*_amd-mi355x-n32-v023-ep1", "v0.23.0", "1", "W4A4", "no (§9 r10)"),
-    ("N=32  v0.30 EP8", "results/*_amd-mi355x-n32-v030",     "v0.30.0", "8", "W4A8", "no (§9 r10)"),
-    ("N=32  v0.30 EP1", "results/*_amd-mi355x-n32-v030-ep1", "v0.30.0", "1", "W4A8", "no (§9 r10)"),
+    ("N=32  v0.23 EP8", "results/*_amd-mi355x-n32-v023",     "v0.23.0", "8", "W4A4", "no — W4A4 (§8.5)"),
+    ("N=32  v0.23 EP1", "results/*_amd-mi355x-n32-v023-ep1", "v0.23.0", "1", "W4A4", "no — W4A4 (§8.5)"),
+    ("N=32  v0.30 EP8", "results/*_amd-mi355x-n32-v030",     "v0.30.0", "8", "W4A8", "yes"),
+    ("N=32  v0.30 EP1", "results/*_amd-mi355x-n32-v030-ep1", "v0.30.0", "1", "W4A8", "yes (best)"),
 ]
 
 def load(pattern):
@@ -109,24 +109,23 @@ def main():
             A(f"| {v} | {m:,.1f} | {rel} |")
         A("")
 
-    # What the version pin costs — the number to put beside §9 ruling 10.
+    # Engine version is now a vendor choice (any stable release available at acceptance,
+    # §5.1 / §9 ruling 10), so this is what the choice is worth rather than what a pin costs.
     a = data.get("N=32  v0.29 EP8"); b = data.get("N=32  v0.29 EP1")
     c = data.get("N=32  v0.30 EP8"); d = data.get("N=32  v0.30 EP1")
     if a and d:
         m = lambda x: sum(x[0].values()) / len(x[0])
-        A("### What the version pin costs\n")
-        A("§9 ruling 10 pins v0.29.0. Measured against the best configuration on each version:\n")
+        A("### What the release choice is worth\n")
+        A("Any stable vLLM release available at acceptance is permitted (§5.1, ruling 10), so "
+          "the engine version is a vendor choice. Best configuration on each release:\n")
         A("| | EP8 | EP1 | best |")
         A("|---|---|---|---|")
-        A(f"| v0.29.0 (pinned) | {m(a):,.1f} | {m(b):,.1f} | **{max(m(a),m(b)):,.1f}** |")
+        A(f"| v0.29.0 | {m(a):,.1f} | {m(b):,.1f} | **{max(m(a),m(b)):,.1f}** |")
         A(f"| v0.30.0 | {m(c):,.1f} | {m(d):,.1f} | **{max(m(c),m(d)):,.1f}** |")
-        A(f"\nThe pin costs **{(max(m(c),m(d))/max(m(a),m(b))-1)*100:.1f}%** on this hardware — "
-          f"and more than the EP8-only comparison suggests, because v0.30.0 also repairs an "
-          f"EP1 regression (below).\n")
-        A("That is a smaller number than the v0.23.0 comparison implies, and it argues the pin "
-          "is roughly well-placed rather than badly stale: v0.23.0 -> v0.29.0 was 5.5x, "
-          "v0.29.0 -> v0.30.0 is single digits. Kernel maturity arrived between those releases "
-          "and is now incremental.\n")
+        A(f"\nv0.30.0 is worth **{(max(m(c),m(d))/max(m(a),m(b))-1)*100:.1f}%** over v0.29.0 "
+          f"best-to-best — more than the EP8-only comparison suggests, because v0.30.0 also "
+          f"repairs an EP1 regression (below). v0.23.0 is not a candidate on precision grounds: "
+          f"it runs the MoE as W4A4, which §8.5 prohibits.\n")
         # the EP1 regression, version-specific
         k = ("8192", "1024", "mid")
         if all(k in x[0] for x in (a, b, c, d)):
@@ -138,9 +137,8 @@ def main():
                   f"**{(y[0][k]/x[0][k]-1)*100:+.1f}%** |")
             A("\nThe 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced "
               "across two nodes to within 0.2%. On v0.30.0 the same cell gains instead. So EP1 "
-              "is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs, and "
-              "the best-of-both envelope recommended below is an artifact of the pinned version "
-              "rather than a property of the layouts.\n")
+              "is not inherently weak there — v0.29.0 has a defect that v0.30.0 repairs. Reproduced "
+              "on v0.30.0 too: gpu-13 791.7, gpu-37 794.1, a 0.3% spread.\n")
 
     A("## tok/s/GPU by cell\n")
     hdr = "| shape | point | " + " | ".join(l for l, *_ in RUNS if l in data) + " |"
@@ -164,33 +162,34 @@ def main():
     A("| **mean** | | " + " | ".join(means) + " |")
     A("")
 
-    # Best-of-both envelope across the two submittable v0.29.0 layouts. §9 ruling 9:
-    # "each cell takes the best. The reported cells are an envelope and need not all come
-    # from one layout." Both are individually legal, so the envelope is too.
-    a = data.get("N=32  v0.29 EP8"); b = data.get("N=32  v0.29 EP1")
-    if a and b:
-        A("## Submission recommendation: submit both v0.29.0 layouts\n")
-        A("§9 ruling 9 credits each cell to the best layout, and the reported cells need not "
-          "all come from one configuration. EP8 and EP1 are both legal on the pinned engine "
-          "(§8.4 makes `--enable-expert-parallel` tunable) and N=32 is honest in both, so the "
-          "envelope of the two is itself a legal submission and beats either alone.\n")
-        A("| shape | point | EP8 | EP1 | best |")
-        A("|---|---|---|---|---|")
-        tot = {"EP8": 0.0, "EP1": 0.0, "best": 0.0}
+    # Submission recommendation: per §9 ruling 9 each cell takes the best submittable
+    # configuration. Submittable = stable release + W4A8 (v0.23.0 is W4A4, barred by §8.5).
+    subs = [l for l, pat, eng, ep, prec, sub in RUNS if sub.startswith("yes") and l in data]
+    if len(subs) >= 2:
+        A("## Submission recommendation\n")
+        A("Submittable here means a stable vLLM release and W4A8 MoE precision. §9 ruling 9 "
+          "credits each cell to the best configuration, so the envelope below is itself a "
+          "legal submission.\n")
+        A("| shape | point | best | from |")
+        A("|---|---|---|---|")
+        tot = 0.0; n = 0; winners = set()
         for i_len, o_len in shapes:
             for pt in POINTS:
                 k = (i_len, o_len, pt)
-                x, y = a[0].get(k), b[0].get(k)
-                if x is None or y is None:
+                cand = [(data[l][0][k], l) for l in subs if k in data[l][0]]
+                if not cand:
                     continue
-                win = "EP1" if y > x else "EP8"
-                tot["EP8"] += x; tot["EP1"] += y; tot["best"] += max(x, y)
-                A(f"| {i_len}→{o_len} | {pt} | {x:,.1f} | {y:,.1f} | **{max(x,y):,.1f}** ({win}) |")
-        n = len(a[0])
-        A(f"| **mean** | | {tot['EP8']/n:,.1f} | {tot['EP1']/n:,.1f} | "
-          f"**{tot['best']/n:,.1f}** |")
-        A(f"\nEnvelope is **+{100*(tot['best']/tot['EP8']-1):.1f}%** over the EP8 baseline "
-          f"and +{100*(tot['best']/tot['EP1']-1):.1f}% over EP1 alone.\n")
+                v, w = max(cand)
+                tot += v; n += 1; winners.add(w)
+                A(f"| {i_len}→{o_len} | {pt} | **{v:,.1f}** | {w.strip()} |")
+        base = sum(data["N=32  v0.29 EP8"][0].values()) / len(data["N=32  v0.29 EP8"][0])
+        A(f"| **mean** | | **{tot/n:,.1f}** | |")
+        if len(winners) == 1:
+            A(f"\n**{next(iter(winners)).strip()} wins every cell**, so no envelope is needed — "
+              f"submit that single configuration. {100*(tot/n/base-1):+.1f}% over the original "
+              f"v0.29.0 EP8 baseline.\n")
+        else:
+            A(f"\nEnvelope is {100*(tot/n/base-1):+.1f}% over the v0.29.0 EP8 baseline.\n")
 
     # Cross-node reproducibility, when the same config has been run on both nodes.
     import glob as _g
