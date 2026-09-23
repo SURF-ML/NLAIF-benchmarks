@@ -50,6 +50,23 @@ supported on AITER. Please enable aiter with VLLM_ROCM_USE_AITER=1'
 
 **Fix.** `export VLLM_ROCM_USE_AITER=1`.
 
+**On v0.30.0 the symptom changes and gets worse.** The guard moved (to
+`sparse_attn_indexer_kpool.py`) and no longer fires first. Without the variable, v0.30.0 gets
+past it, proceeds into CUDA graph capture, and dies with
+
+```
+CUDA error: operation not permitted when stream is capturing
+```
+
+which does not mention AITER at all. Verified as a single-variable comparison: the same v0.30.0
+config runs all six cells with the variable set. The default is still `False` in both releases.
+
+**AITER JIT-compiles.** For any kernel the image has no prebuilt entry for, AITER compiles from
+source bundled in the same image, for the local `gfx` arch, at first use. That is the shipped
+package's normal operation — the same class as torch.compile / inductor — not an installed
+custom kernel. It is why the image tree must be writable (§3) and why seeding the kernel cache
+matters: a cold cache costs roughly ten minutes per engine start.
+
 **Rules note.** This is *permitted* — AITER ships inside the official
 `vllm/vllm-openai-rocm` image (verified: 116 prebuilt `.so`, 3494 prebuilt kernels), so the
 env var selects a code path already present at the pinned version and installs nothing.
