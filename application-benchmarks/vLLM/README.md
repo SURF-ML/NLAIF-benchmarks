@@ -254,8 +254,15 @@ are platform-specific and **permitted** — see [§8.3](#83-tunable-parameters);
 change in your submission ([§6](#6-submitting-results)). The structure of `system.sh` is
 identical everywhere.
 
-**Single-node AMD.** DeepSeek-V4-Pro does not start on ROCm without `VLLM_ROCM_USE_AITER=1`
-(`Sparse attention indexer ROCm path is only supported on AITER`); set it in your `system.sh`.
+**Single-node AMD.** Set `VLLM_ROCM_USE_AITER=1` in your `system.sh`. DeepSeek-V4-Pro does not
+start on ROCm without it in the releases tested, and the failure is not always self-explanatory:
+
+- **v0.29.0:** `Sparse attention indexer ROCm path is only supported on AITER. Please enable aiter
+  with VLLM_ROCM_USE_AITER=1`
+- **v0.30.0:** `CUDA error: operation not permitted when stream is capturing` — which does not
+  mention AITER and reads like a CUDA-graph problem. Check this variable before debugging graph
+  capture.
+
 Two container-runtime notes if you use podman rather than apptainer: AITER JIT-compiles into its
 own `dist-packages` directory and Triton caches under `$HOME`, so the image tree must be
 writable — rootless podman's default user namespace already gives you this, but `--userns=keep-id`
@@ -496,18 +503,9 @@ being evaluated alongside the hardware.
 > per-platform compilation choice, so it lives in that model's config, not the shared harness
 > command.
 
-> **ROCm: `VLLM_ROCM_USE_AITER=1` is permitted, and is required to run DeepSeek-V4-Pro at all.**
-> AITER is AMD's fused-kernel library. It ships inside the official `vllm/vllm-openai-rocm`
-> image, so enabling it installs nothing — the env var only selects a code path already present
-> in the release used, which is why [§8.5](#85-prohibited) and ruling 5 do not apply. It falls
-> under both *Attention backend* and *MoE & linear kernels* above (it supplies the sparse-attention
-> indexer and the mixed MoE GEMM), and under *System / operational environment*: without it vLLM
-> refuses to build the executor —
-> `Sparse attention indexer ROCm path is only supported on AITER` — so this is not a speed lever
-> but the only path to running the fixed configuration. Note that AITER JIT-compiles any kernel
-> the image has no prebuilt entry for, from source bundled in that same image, for the local
-> `gfx` arch; this is the shipped package's normal operation, the same class as torch.compile /
-> inductor. Record it in the submission's deviations note ([§6](#6-submitting-results)).
+> **ROCm:** `VLLM_ROCM_USE_AITER=1` is permitted. It selects kernels already present in the
+> official image and installs nothing, so [§8.5](#85-prohibited) and ruling 5 do not apply. See
+> [§10](#10-flag-reference) and, for the symptoms when it is missing, [§5.4](#54-platform-configuration).
 
 ### 8.4 Parallelism
 
@@ -605,6 +603,7 @@ Condensed classification of all evaluated parameters. This document governs in a
 | `--block-size` | ✅ | Memory layout only. |
 | `--enable-expert-parallel` | ✅ | Redistributes experts across the existing `TP × PP` world; adds no GPUs to the denominator. Official image only. |
 | System / network environment (`NCCL_SOCKET_IFNAME`, runtime flags, …) | ✅ | Required for correct operation; affects speed, not results. |
+| `VLLM_ROCM_USE_AITER=1` | ✅ | ROCm only. Required for DeepSeek-V4 in the releases tested (v0.29.0, v0.30.0). Selects kernels inside the official image; installs nothing. |
 | `--data-parallel-size` | — | Outside the scored configuration (scale with TP/PP). |
 | `--speculative-config` | ⛔ | Hardware-speed-dependent acceptance rate. |
 | `--performance-mode` | ⛔ | Sets different parameters per platform; not auditable. |
