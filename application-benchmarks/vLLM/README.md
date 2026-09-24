@@ -166,23 +166,10 @@ N while throughput still scales, and *falls* once N exceeds what the KV cache ho
 begins preempting. **Declaring your true maximum is also your best score**, so no harness
 enforcement is needed.
 
-Find it by measurement: raise N until the `high` point's tok/s/GPU stops rising, and check that
-the engine is not preempting at that N — `vllm:num_preemptions_total` on the server's `/metrics`
-endpoint stays at 0 and `vllm:num_requests_waiting` stays near 0 under the `high` load.
-
-vLLM's startup line
-
-```
-Maximum concurrency for 9216 tokens per request: 42.65x
-```
-
-is **not** a reliable ceiling. It is a worst-case reservation computed at startup, and for models
-with a hybrid KV cache it can understate what fits by more than an order of magnitude: on
-DeepSeek-V4-Pro, a 16× MI355X layout reporting 293.7x ran 256 near-full-length requests at 1.5%
-KV-cache usage with no preemption. Treat it as a lower bound. The harness still captures it to
-`serve.log` beside the results, which is submitted as evidence ([§6](#6-submitting-results)); if
-your declared N is above it, include the preemption evidence in the submission.
-Because both shapes have identical peak KV footprint, **one N covers both**.
+Determine N yourself, by measurement. vLLM's startup line (`Maximum concurrency for 9216 tokens
+per request: …x`) is not an accurate ceiling — for DeepSeek-V4-Pro it understates what fits by
+more than an order of magnitude — so do not take N from it. Because both shapes have identical
+peak KV footprint, **one N covers both**.
 
 The scored configuration space per submission is:
 
@@ -374,8 +361,8 @@ covers every cell** — each workload shape at each operating point. A missing c
 submission incomplete rather than low-scoring, so re-run any cell that failed.
 
 Submit, alongside `scores.csv`:
-- Each layout's **`serve.log`**, so the declared N can be checked against the KV capacity the
-  engine actually reported ([§4](#4-workloads--datasets)).
+- Each layout's **`serve.log`**, the engine's own record of how each layout was started and
+  what it reported ([§4](#4-workloads--datasets)).
 - A **deviations note** — any system/operational flag you changed to make the suite run on your
   platform ([§5.6](#56-when-a-run-fails)); "none" if unchanged.
 - The **container image** identity (vendor + exact vLLM release, e.g. `v0.30.0`) and confirmation that **no fixed

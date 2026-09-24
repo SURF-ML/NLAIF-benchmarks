@@ -18,11 +18,22 @@ RUNS = [
     ("N=32  v0.23 EP8", "results/*_amd-mi355x-n32-v023",     "v0.23.0", "8", "W4A4", "no — W4A4 (§8.5)"),
     ("N=32  v0.23 EP1", "results/*_amd-mi355x-n32-v023-ep1", "v0.23.0", "1", "W4A4", "no — W4A4 (§8.5)"),
     ("N=32  v0.30 EP8", "results/*_amd-mi355x-n32-v030",     "v0.30.0", "8", "W4A8", "yes"),
-    ("N=32  v0.30 EP1", "results/*_amd-mi355x-n32-v030-ep1", "v0.30.0", "1", "W4A8", "yes (best)"),
+    ("N=32  v0.30 EP1", "results/*_amd-mi355x-n32-v030-ep1", "v0.30.0", "1", "W4A8", "yes"),
+    # One run dir, two layouts: '#ep8' / '#ep1' selects a layout's cells from summary.json.
+    ("N=512 v0.29 EP8", "results/*_amd-mi355x-1node-n512#ep8", "v0.29.0", "8", "W4A8", "yes"),
+    ("N=512 v0.29 EP1", "results/*_amd-mi355x-1node-n512#ep1", "v0.29.0", "1", "W4A8", "yes"),
 ]
 
 def load(pattern):
     """Newest complete scores.csv matching pattern, excluding smoke dirs."""
+    if "#ep" in pattern:
+        pattern, sel = pattern.split("#")
+        run = _newest(pattern)
+        if not run:
+            return None, None
+        want_ep = sel == "ep8"
+        rows = {k[1:]: r["tpg"] for k, r in load_cells(run).items() if k[0][2] == want_ep}
+        return (rows or None), run
     best = None
     for d in sorted(glob.glob(str(ROOT / pattern))):
         if "smoke" in d:
@@ -58,6 +69,197 @@ def kv_line(run_dir):
             return float(m.group(1))
     return None
 
+# Per-cell runs, read from summary.json rather than scores.csv (which keeps only the best layout
+# per cell): the two-node runs, and the single-node N=512 run as power/latency reference.
+TWO_NODE_RUNS = ["results/*_amd-mi355x-2node-rdma-n1024",    # TP8/PP2, measured N
+                 "results/*_amd-mi355x-2node-rdma-sweep"]    # other layouts, stopped early
+ONE_NODE_RUN = "results/*_amd-mi355x-1node-n512"             # TP8 EP8+EP1, N=512 @ 0.97
+
+
+def _newest(pattern):
+    dirs = sorted(glob.glob(str(ROOT / pattern)))
+    return pathlib.Path(dirs[-1]) if dirs else None
+
+
+def load_cells(run_dir):
+    """{(layout, in, out, point): record} from every summary.json under run_dir.
+
+    layout = (TP, PP, EP-on); each record also carries its serve.log capacity and, when the
+    cell dir holds that job's power_samples.csv, the mean GPU power over its bench window.
+    """
+    from datetime import datetime, timedelta
+
+    def samples_of(pf):
+        # time,node,jobid,"8 powers","8 utilisations" — one row per node per ~5 s, this job only
+        out = []
+        for row in csv.reader(open(pf)):
+            if row[0] == "time" or len(row) < 4:
+                continue
+            w = [float(x) for x in row[3].split()]
+            if len(w) == 8:
+                out.append((datetime.fromisoformat(row[0]), sum(w) / 8))
+        return out
+
+    cells = {}
+    for f in sorted(run_dir.glob("*/summary.json")):
+        d = json.loads(f.read_text())
+        d = d[0] if isinstance(d, list) else d
+        tp, pp = int(d.get("tensor-parallel-size", 1)), int(d.get("pipeline-parallel-size", 1))
+        ep = bool(d.get("enable-expert-parallel", True))
+        i_len = "8192" if "i8192" in d["dataset-path"] else "1024"
+        o_len = str(d["custom-output-len"])
+        rec = {"gpus": tp * pp, "n": int(d["max_num_seqs"]), "conc": int(d["max_concurrency"]),
+               "tpg": d["total_token_throughput"] / (tp * pp),
+               "tput": d["total_token_throughput"], "ok": d["completed"], "fail": d["failed"],
+               "ttft": d["median_ttft_ms"], "tpot": d["median_tpot_ms"], "kv": None,
+               "watts": None, "rdma": None}
+        log = f.parent / "serve.log"
+        if log.exists():
+            txt = log.read_text(errors="ignore")
+            m = re.search(r"Maximum concurrency for [\d,]+ tokens per request: ([\d.]+)x", txt)
+            rec["kv"] = float(m.group(1)) if m else None
+            rec["rdma"] = "GDRDMA" in txt and "via NET/Socket" not in txt
+        pf = f.parent / "power_samples.csv"
+        if pf.exists():
+            end = datetime.strptime(d["date"], "%Y%m%d-%H%M%S")
+            start = end - timedelta(seconds=d["duration"])
+            w = [p for t, p in samples_of(pf) if start <= t <= end]
+            # Report only a well-covered window: ≥60% of the ~5 s samples expected per node.
+            expected = d["duration"] / 5 * max(1, (tp * pp) // 8)
+            rec["watts"] = sum(w) / len(w) if w and len(w) >= 0.6 * expected else None
+        cells[((tp, pp, ep), i_len, o_len, d["_point"])] = rec
+    return cells
+
+
+def _layout_label(layout):
+    # vLLM forms the expert-parallel group from the TP ranks of each pipeline stage, so EP on
+    # is EP=TP (EP8 on TP8/PP2, EP2 on TP2/PP8) — the same naming as the single-node EP8/EP1.
+    tp, pp, ep = layout
+    return f"TP{tp}/PP{pp} EP{tp if ep else 1}"
+
+
+def two_node_section(A, data, shapes):
+    cells = {}
+    for pat in TWO_NODE_RUNS:
+        run = _newest(pat)
+        if run:
+            cells.update(load_cells(run))
+    if not cells:
+        return
+    one = _newest(ONE_NODE_RUN)
+    one_cells = load_cells(one) if one else {}
+    # Layout order: most TP first, EP on before off.
+    layouts = sorted({k[0] for k in cells}, key=lambda l: (-l[0], not l[2]))
+    n_of = {l: next(r["n"] for k, r in cells.items() if k[0] == l) for l in layouts}
+    lab = lambda l: f"{_layout_label(l)} N={n_of[l]}"
+    fmt = lambda v, s="{:,.1f}": s.format(v) if v is not None else "—"
+    # Best single-node result per cell, over every v0.29.0 run above (engine held equal).
+    one_keys = [k for k in data if "v0.29" in k]
+    def best_one(k):
+        c = [(data[l][0][k], l.strip()) for l in one_keys if k in data[l][0]]
+        return max(c) if c else (None, None)
+
+    A("## Two nodes: 16× MI355X over RDMA\n")
+    A("Both nodes (`mi355-gpu-13` + `mi355-gpu-37`) as one 16-GPU deployment: SLURM, Ray over "
+      "rootless podman, RCCL over the eight per-GPU AMD Pollara NICs per node (GPU-direct RDMA, "
+      "RoCE v2). Engine v0.29.0, W4A8, `GPU_MEM_UTIL=0.90`. Configs "
+      "`amd/mi355x-2node-rdma-n1024` (TP8/PP2, N measured) and `amd/mi355x-2node-rdma-sweep` "
+      "(other layouts; N from the startup line, stopped after the TP2/PP8 EP2 cells); setup in "
+      "`docs/AMD-MI355X-TROUBLESHOOTING.md` §12. tok/s/GPU is the score metric (§7): total "
+      "tokens/s over `TP × PP` = 16 GPUs. TP16 cannot load this checkpoint (§12.6).\n")
+
+    A("### Layouts\n")
+    A("| layout | N | reported KV capacity | cells | RCCL transport |")
+    A("|---|---|---|---|---|")
+    for l in layouts:
+        recs = [r for k, r in cells.items() if k[0] == l]
+        kv = next((r["kv"] for r in recs if r["kv"]), None)
+        tr = ("RDMA (GDRDMA) in every cell" if all(r["rdma"] for r in recs)
+              else "⚠ not RDMA in every cell")
+        bad = sum(1 for r in recs if r["fail"])
+        A(f"| {_layout_label(l)} | {n_of[l]} | {fmt(kv, '{:.2f}x')} | "
+          f"{len(recs)}/6{' (' + str(bad) + ' with failed requests)' if bad else ''} | {tr} |")
+    A("")
+
+    A("### tok/s/GPU by cell\n")
+    A("Concurrency in brackets: operating points are fractions of each layout's own N. The "
+      "single-node column is the best v0.29.0 result for that cell from the table above.\n")
+    A("| shape | point | " + " | ".join(lab(l) for l in layouts)
+      + " | 1 node, best | 2 nodes vs 1 node |")
+    A("|---|---|" + "---|" * (len(layouts) + 2))
+    for i_len, o_len in shapes:
+        for pt in POINTS:
+            row = []; best = None
+            for l in layouts:
+                r = cells.get((l, i_len, o_len, pt))
+                row.append(f"{r['tpg']:,.1f} ({r['conc']})" if r else "—")
+                if r and (best is None or r["tpg"] > best):
+                    best = r["tpg"]
+            ref, who = best_one((i_len, o_len, pt))
+            vs = f"**{(best/ref-1)*100:+.0f}%**" if best and ref else "—"
+            A(f"| {i_len}→{o_len} | {pt} | " + " | ".join(row)
+              + f" | {fmt(ref)} ({who or '—'}) | {vs} |")
+    A("")
+
+    # Same concurrency on one node and on two: the second node's actual contribution.
+    pairs = []
+    for (l, i_len, o_len, pt), r in cells.items():
+        for (l1, i1, o1, p1), r1 in one_cells.items():
+            if ((i1, o1) == (i_len, o_len) and r1["conc"] == r["conc"] and l1[2] == l[2]
+                    and l[0] == l1[0] == 8):
+                pairs.append((i_len, o_len, r["conc"], l, r, l1, r1))
+    if pairs:
+        A("### Same load on one node and on two\n")
+        A("Adding the second node to the same TP8 layout (TP8 → TP8/PP2), at equal concurrency and "
+          "EP setting. Total throughput is input + output tokens/s. At these loads one node "
+          "already holds every request without preemption, so the second node doubles the GPUs "
+          "and adds no throughput.\n")
+        A("| shape | concurrency | 1 node (8 GPUs) | 2 nodes (16 GPUs) | total gain | tok/s/GPU 1 → 2 nodes |")
+        A("|---|---|---|---|---|---|")
+        for i_len, o_len, c, l, r, l1, r1 in sorted(pairs, key=lambda x: (x[0], x[2])):
+            A(f"| {i_len}→{o_len} | {c} | {r1['tput']:,.0f} tok/s | {r['tput']:,.0f} tok/s | "
+              f"{(r['tput']/r1['tput']-1)*100:+.0f}% | {r1['tpg']:,.1f} → {r['tpg']:,.1f} |")
+        A("")
+
+    A("### Latency\n")
+    A("Median time per output token (1024→8192, decode-bound) and median time to first token "
+      "(8192→1024, prefill-bound). 8192→1024 is admission-limited at high concurrency: the fixed "
+      "`--max-num-batched-tokens=9216` admits roughly one 8k prompt per engine step, so requests "
+      "queue for prefill while the KV cache is mostly empty.\n")
+    A("| metric | point | " + " | ".join(lab(l) for l in layouts) + " |")
+    A("|---|---|" + "---|" * len(layouts))
+    for name, (i_len, o_len), key in (("TPOT (ms)", ("1024", "8192"), "tpot"),
+                                      ("TTFT (ms)", ("8192", "1024"), "ttft")):
+        for pt in POINTS:
+            vals = [cells.get((l, i_len, o_len, pt)) for l in layouts]
+            A(f"| {name} | {pt} | " + " | ".join(
+                (f"{r[key]:,.0f}" if key == "ttft" else f"{r[key]:.1f}") if r else "—"
+                for r in vals) + " |")
+    A("")
+
+    # Power: every per-cell run, one node and two.
+    cols = [("1 node " + _layout_label(l).split(" ", 1)[1] + f" N={r['n']}", l, one_cells)
+            for l, r in {k[0]: v for k, v in one_cells.items()}.items()]
+    cols = sorted(cols, key=lambda c: not c[1][2]) + [(lab(l), l, cells) for l in layouts]
+    if any(r["watts"] for c in cols for k, r in c[2].items() if k[0] == c[1]):
+        A("## Power\n")
+        A("Mean GPU package power over each cell's bench window only (engine load excluded), "
+          "from `rocm-smi` sampled every ~5 s on every node of the job (`power_samples.csv` in "
+          "each cell directory); cells with under 60% sample coverage are left blank. Efficiency "
+          "is total tokens per joule of GPU energy. MI355X board limit: 1,400 W.\n")
+        A("| shape | point | " + " | ".join(c[0] for c in cols) + " |")
+        A("|---|---|" + "---|" * len(cols))
+        for i_len, o_len in shapes:
+            for pt in POINTS:
+                row = []
+                for _, l, src in cols:
+                    r = src.get((l, i_len, o_len, pt))
+                    row.append(f"{r['watts']:,.0f} W · {r['tput']/(r['watts']*r['gpus']):.2f} tok/J"
+                               if r and r["watts"] else "—")
+                A(f"| {i_len}→{o_len} | {pt} | " + " | ".join(row) + " |")
+        A("")
+
+
 def main():
     data = {}
     for label, pat, *_ in RUNS:
@@ -72,10 +274,10 @@ def main():
     A("# DeepSeek-V4-Pro on 8× MI355X — benchmark findings\n")
     A("Generated by `docs/generate_findings.py` from `results/*/scores.csv`. "
       "Numbers are read from disk, not transcribed.\n")
-    A(f"Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman, "
-      f"no scheduler. Driver: `run_nosched.sh`. Datasets and harness parameters per the "
-      f"benchmark spec; see `docs/AMD-MI355X-TROUBLESHOOTING.md` for how the platform was "
-      f"brought up.\n")
+    A(f"Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman. The N=16/N=32 "
+      f"runs used the scheduler-free `run_nosched.sh`; the N=512 and two-node runs use SLURM "
+      f"(`./run.sh <cluster> --local`). Datasets and harness parameters per the benchmark spec; "
+      f"see `docs/AMD-MI355X-TROUBLESHOOTING.md` for how the platform was brought up.\n")
 
     A("## Configurations\n")
     A("| run | engine | EP | MoE precision | reported KV capacity | submittable |")
@@ -87,10 +289,14 @@ def main():
         kv = data[label][2]
         kvs = f"{kv:.2f}x" if kv else "—"
         warn = ""
-        if kv and "N=32" in label and kv < 32:
-            warn = " ⚠ below declared N"
+        n = int(label.split()[0][2:])
+        if kv and kv < n:
+            warn = " (below N †)" if n > 2 * kv else " ⚠ below declared N"
         A(f"| {label} | {eng} | {ep} | {prec} | {kvs}{warn} | {sub} |")
     A("")
+    A("† vLLM's startup capacity line is a worst-case reservation, not the real ceiling, for "
+      "DeepSeek-V4 (README §4). N=512 was measured instead: 512 requests run with ~21% KV-cache "
+      "usage and no preemption (troubleshooting §12.6). The N=16/N=32 rows took N from that line.\n")
 
     A("## Engine version comparison\n")
     A("Same six cells, same node, same TP8 layout and N=32 @ GPU_MEM_UTIL=0.97 — only the "
@@ -158,7 +364,7 @@ def main():
         if label not in data:
             continue
         vs = list(data[label][0].values())
-        means.append(f"**{sum(vs)/len(vs):,.1f}**" if vs else "—")
+        means.append(f"**{sum(vs)/len(vs):,.1f}**" if len(vs) == 6 else "—")
     A("| **mean** | | " + " | ".join(means) + " |")
     A("")
 
@@ -225,6 +431,8 @@ def main():
             A(f"\nWorst-case disagreement across {len(common)} shared cells: "
               f"**{worst:.1f}%**.\n")
 
+    two_node_section(A, data, shapes)
+
     # External comparison: SemiAnalysis InferenceX. Their dashboard's own API carries the
     # numbers; docs/semianalysis-results.json is the filtered extract.
     sa_path = ROOT / "docs" / "semianalysis-results.json"
@@ -234,65 +442,58 @@ def main():
         A("## External comparison: SemiAnalysis InferenceX\n")
         A(f"Source: `{sa['source']}` (fetched {sa['fetched']}), filtered to "
           f"`{sa['filter']}` — i.e. the same model, hardware and TP8/EP1 layout we run.\n")
-        A("Their `8192→1024` shape matches ours exactly, at concurrencies 16 and 32 which are "
-          "our `mid` and `high` points. (Their other shape is 1024→1024; ours is 1024→8192, "
-          "so those do not compare.)\n")
-        ep8, ep1 = data.get("N=32  v0.29 EP8"), data.get("N=32  v0.29 EP1")
-        if ep8 and ep1:
-            A("| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |")
-            A("|---|---|---|---|---|---|")
-            for conc, pt in ((16, "mid"), (32, "high")):
-                r = rec.get((8192, 1024, conc))
-                if not r:
-                    continue
-                theirs = r["metrics"]["tput_per_gpu"]
-                a, b = ep8[0][("8192", "1024", pt)], ep1[0][("8192", "1024", pt)]
-                best = max(a, b)
-                A(f"| {conc} | {pt} | {theirs:,.1f} | {a:,.1f} | {b:,.1f} | "
-                  f"**{(best/theirs-1)*100:+.1f}%** |")
-            A("\nAll tok/s/GPU. **The two independent implementations agree to within 5%**, "
-              "which is the main thing this comparison establishes: our harness and theirs "
-              "measure the same hardware the same way.\n")
-            A("Caveat on the remaining gap: they run a vLLM **nightly** "
-              f"(`{(rec.get((8192,1024,32)) or {}).get('image','?')}`) where we pin v0.29.0, and "
-              "engine version was worth 5.5x between v0.23.0 and v0.29.0 on this stack. A few "
-              "percent either way is well inside that.\n")
-        # KV pool gap — every configuration hypothesis tested and refuted.
+        A("Their `8192→1024` shape matches ours exactly. (Their other shape is 1024→1024; ours is "
+          "1024→8192, so those do not compare.) Each row compares at equal concurrency: our N=32 "
+          "configs at their 16/32, our N=512 configs at their 256/512.\n")
+        A("| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |")
+        A("|---|---|---|---|---|---|")
+        gaps = []
+        for conc, pt, n in ((16, "mid", "N=32 "), (32, "high", "N=32 "),
+                            (256, "mid", "N=512"), (512, "high", "N=512")):
+            r = rec.get((8192, 1024, conc))
+            e8, e1 = data.get(f"{n} v0.29 EP8"), data.get(f"{n} v0.29 EP1")
+            k = ("8192", "1024", pt)
+            if not (r and e8 and e1 and k in e8[0] and k in e1[0]):
+                continue
+            theirs = r["metrics"]["tput_per_gpu"]
+            a8, a1 = e8[0][k], e1[0][k]
+            gaps.append((max(a8, a1) / theirs - 1) * 100)
+            A(f"| {conc} | {pt} ({n.strip()}) | {theirs:,.1f} | {a8:,.1f} | {a1:,.1f} | "
+              f"**{(max(a8, a1)/theirs-1)*100:+.1f}%** |")
+        if gaps:
+            A(f"\nAll tok/s/GPU. **The two independent implementations agree to within "
+              f"{max(abs(g) for g in gaps):.1f}% at every shared concurrency**, from 16 to 512.\n")
+        A("How they reach concurrency 512 on one node: their serve command "
+          "(`benchmarks/single_node/fixed_seq_len/deprecated/dsv4_fp4_mi355x_vllm.sh` in "
+          "InferenceX) sets no `--max-num-seqs`, so vLLM's default for ≥160 GB GPUs, 1024, "
+          "applies — they never take N from the startup capacity line. They also run a vLLM "
+          f"**nightly** (`{(rec.get((8192,1024,32)) or {}).get('image','?')}`, contained in "
+          "v0.30.0) with flags our spec does not use or does not allow: no `--max-model-len` / "
+          "`--max-num-batched-tokens` (fixed at 9216 here, §8.1), `--moe-backend aiter` with "
+          "shared-expert fusion, `FULL_AND_PIECEWISE` CUDA graphs, `--async-scheduling`, and "
+          "`VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=INT4` (an INT4-quantised all-reduce, additional "
+          "activation quantisation under §8.5).\n")
         r32 = rec.get((8192, 1024, 32))
         if r32 and r32["metrics"].get("kv_cache_pool_tokens"):
             theirs_kv = r32["metrics"]["kv_cache_pool_tokens"]
-            A("### The KV pool gap: every hypothesis tested, all refuted\n")
+            A("### The KV pool gap is not a capacity difference\n")
             A(f"SemiAnalysis report {theirs_kv:,} KV tokens for this shape against our 300,533. "
-              "That looked like a large real capacity difference and therefore a cap on N, since "
-              "the `high` operating point **is** N. It does not survive measurement.\n")
-            A("| config | KV cache | pool tokens | max conc |")
-            A("|---|---|---|---|")
-            A("| v0.29.0 (pinned), spec-mandated `fp8` | 165.05 GiB | 300,533 | 32.61x |")
-            A("| v0.30.0, spec-mandated `fp8` | 166.27 GiB | 302,761 | 32.85x |")
-            A("| v0.30.0, `--kv-cache-dtype auto` | 166.27 GiB | 302,761 | 32.85x |")
-            A("| v0.30.0, `-dcp 8` | — | — | `NotImplementedError` |")
-            A("")
-            A("- **The engine version is not the cause.** v0.30.0 moves the pool 0.7%.")
-            A("- **§8.1's literal `fp8` is not the cause.** `auto` is byte-identical on ROCm; the "
-              "`fp8_ds_mla` layout in the v0.30.0 notes is qualified *\"with FlashMLA\"*, a CUDA path.")
-            A("- **DCP is not available**, on either version: `DCP is not supported with sparse "
-              "indexer KV compression (compress_ratio=4)`. v0.30.0's \"PCP+DCP on sparse-MLA "
-              "models\" (#56157) does not lift it here.\n")
-            A("**Most likely explanation, unproven: their figure is not the same quantity.** Their "
-              "harness computes `kv_cache_pool_tokens` via `sum_server_log_capacities`, which sums "
-              "`GPU KV cache size` across an *iterable of server logs* "
-              "(`infx/results/agentic/backends/vllm.py`). vLLM's own figure is the unique pool for "
-              "one engine. A summing artifact fits the evidence better than any configuration "
-              "difference — not least because their throughput matches ours within 5% at the "
-              "concurrencies where both engines fit the batch, which a genuine 14.6x capacity "
-              "advantage would not leave untouched.\n")
-            A("**A caveat on our own arithmetic.** The \"575.9 KiB/token, 16.8x the MLA "
-              "theoretical\" figure quoted earlier in this investigation assumed the MLA tensor "
-              "(kv_lora 512 + rope 64, fp8, 61 layers = 34.3 KiB) is the whole per-token cost. "
-              "DeepSeek-V4 also keeps a sparse-indexer cache — the logs show `Using FP8 indexer "
-              "cache for Lightning Indexer` and `index_topk: 1024` — which that estimate ignores. "
-              "If the indexer dominates, our pool is not anomalous at all and there was never a "
-              "gap to explain. We did not measure the split.\n")
+              "Both are the same vLLM log line, `GPU KV cache size: N tokens`, and vLLM computes "
+              "it as `max_concurrency × max_model_len` (`get_kv_cache_capacity`, "
+              "`vllm/v1/core/kv_cache_utils.py`). Their serve command sets no `--max-model-len`, "
+              "so it is DeepSeek-V4's default of 1,048,576: "
+              f"{theirs_kv:,} = {theirs_kv/1048576:.2f} × 1,048,576. Ours is 32.61 × 9,216. The "
+              "two figures measure the same pool at different request lengths and do not "
+              "compare.\n")
+            A("Neither is the real ceiling either. `max_concurrency` is a worst-case "
+              "reservation summed over DeepSeek-V4's many KV groups (compressed MLA at ratios 4 "
+              "and 128, indexer, compressor state, 128-token sliding window); blocks are "
+              "allocated on demand at runtime. Measured on one node at N=512, 512 requests run "
+              "with ~21% KV-cache usage and no preemption (troubleshooting §12.6).\n")
+            A("Ruled out along the way: the engine version (v0.30.0 moves the reported pool "
+              "0.7%), §8.1's literal `fp8` (`auto` is byte-identical on ROCm), and DCP, which "
+              "refuses to start for this model on either version (`DCP is not supported with "
+              "sparse indexer KV compression (compress_ratio=4)`).\n")
 
     # MFMA counter probe. logs/mfma-counters.txt is the parsed rocpd output (rocprofv3
     # writes SQLite by default, so the raw run log does not carry the numbers).
