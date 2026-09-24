@@ -1,0 +1,20 @@
+[
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "mid",
+    "_n": 16,
+    "max_concurrency": 8,
+    "num_prompts": 16,
+    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
+    "custom-output-len": 8192
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "mid",
+    "_n": 16,
+    "max_concurrency": 8,
+    "num_prompts": 16,
+    "dataset-path": "/dev/shm/dsv4_i8192_o1024_n1024.jsonl",
+    "custom-output-len": 1024
+  }
+]

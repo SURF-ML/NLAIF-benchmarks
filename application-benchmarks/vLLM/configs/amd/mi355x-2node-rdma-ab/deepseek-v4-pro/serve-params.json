@@ -1,0 +1,11 @@
+[
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "trust-remote-code": true,
+    "tokenizer-mode": "deepseek_v4",
+    "enable-expert-parallel": false,
+    "tensor-parallel-size": 8,
+    "pipeline-parallel-size": 2,
+    "max_num_seqs": 16
+  }
+]

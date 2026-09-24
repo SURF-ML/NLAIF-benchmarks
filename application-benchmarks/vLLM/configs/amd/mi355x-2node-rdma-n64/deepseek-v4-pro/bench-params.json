@@ -1,0 +1,11 @@
+[
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "high",
+    "_n": 64,
+    "max_concurrency": 64,
+    "num_prompts": 128,
+    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
+    "custom-output-len": 8192
+  }
+]

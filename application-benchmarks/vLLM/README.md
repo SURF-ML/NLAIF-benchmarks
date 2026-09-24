@@ -166,14 +166,22 @@ N while throughput still scales, and *falls* once N exceeds what the KV cache ho
 begins preempting. **Declaring your true maximum is also your best score**, so no harness
 enforcement is needed.
 
-You do not need to search for it. Start the layout once and read vLLM's own startup line:
+Find it by measurement: raise N until the `high` point's tok/s/GPU stops rising, and check that
+the engine is not preempting at that N — `vllm:num_preemptions_total` on the server's `/metrics`
+endpoint stays at 0 and `vllm:num_requests_waiting` stays near 0 under the `high` load.
+
+vLLM's startup line
 
 ```
 Maximum concurrency for 9216 tokens per request: 42.65x
 ```
 
-Use that value, or the nearest lower power of two, as N. The harness captures this line to
-`serve.log` beside the results, which is submitted as evidence ([§6](#6-submitting-results)).
+is **not** a reliable ceiling. It is a worst-case reservation computed at startup, and for models
+with a hybrid KV cache it can understate what fits by more than an order of magnitude: on
+DeepSeek-V4-Pro, a 16× MI355X layout reporting 293.7x ran 256 near-full-length requests at 1.5%
+KV-cache usage with no preemption. Treat it as a lower bound. The harness still captures it to
+`serve.log` beside the results, which is submitted as evidence ([§6](#6-submitting-results)); if
+your declared N is above it, include the preemption evidence in the submission.
 Because both shapes have identical peak KV footprint, **one N covers both**.
 
 The scored configuration space per submission is:
@@ -193,7 +201,7 @@ The scored configuration space per submission is:
 | Job scheduler | **SLURM (required).** One worker job per `(serve, bench)` pair; multi-node serves use `srun` + Ray. The orchestrator may run as a submitted job or locally with `--local` (see §5.5). |
 | Container runtime | Apptainer / Singularity, or Podman. Workers run exclusively inside the official image. |
 | Official base image | Any official vLLM image from [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) — e.g. `vllm/vllm-openai` (CUDA) or `vllm/vllm-openai-rocm` (ROCm) — at a stable release (see below). Images from any other source are not permitted ([§8.5](#85-prohibited)). |
-| Accelerators | NVIDIA or AMD. Single-node and multi-node (NVIDIA validated; AMD single-node validated, multi-node AMD — see §5.4). |
+| Accelerators | NVIDIA or AMD. Single-node and multi-node (NVIDIA validated; AMD validated single-node and on 2× 8 MI355X — see §5.4). |
 | Host Python | ≥ 3.11 (orchestrator only — runs on the host for SLURM access). |
 | Model cache | A shared `HF_HOME` visible from all nodes. Download weights once before the run. |
 | Datasets | `datasets/*.jsonl` from the organisers ([§4](#4-workloads--datasets)). |
@@ -276,8 +284,10 @@ starts a fresh engine and would otherwise recompile.
 the `NCCL_*` env vars and the container runs the official ROCm image unmodified. On ROCm the
 CUDA-only compiled-graph transport (CuPy) is skipped and Ray falls back to RCCL collectives; if a
 multi-node ROCm serve fails to bring up, set `VLLM_USE_RAY_COMPILED_DAG=0` in your `system.sh`.
-Validate multi-node AMD on your hardware; if it cannot run due to a bug in this harness, see
-[§5.6](#56-when-a-run-fails).
+Validated on two 8× MI355X nodes over RoCE (AMD Pollara NICs) with rootless podman; the
+configuration, including the RCCL/verbs settings the container needs, is in
+[`docs/AMD-MI355X-TROUBLESHOOTING.md`](docs/AMD-MI355X-TROUBLESHOOTING.md) §12. Validate on your
+own hardware; if it cannot run due to a bug in this harness, see [§5.6](#56-when-a-run-fails).
 
 The serve- and bench-parameter JSON files are the **scored configuration** and are authored by the
 canonical generator [`scripts/gen_configs.py`](scripts/gen_configs.py). Do not edit them except
