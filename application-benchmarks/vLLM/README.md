@@ -59,14 +59,15 @@ It is normalised two ways:
 | Quantity | Formula | Interpretation | Role |
 |----------|---------|----------------|------|
 | **tok/s/GPU** | `total_token_throughput / (TP × PP)` | Hardware efficiency | **Scored** |
-| **tok/s/user** | `total_token_throughput / max_concurrency` | Per-user interactivity | Reported |
+| **tok/s/user** | `total_token_throughput × OSL/(ISL+OSL) / max_concurrency` | Per-user interactivity (output tokens a user sees per second) | Reported |
 
 **tok/s/GPU is the scored quantity at every operating point.** Dividing by `TP × PP` keeps
 hardware cost in the denominator, so additional GPUs are rewarded only through the larger KV
 cache and lower per-GPU load they buy, not through their raw count.
 
-tok/s/user is recorded alongside for interpretation, but is not scored. At a fixed concurrency
-the two are proportional (`tok/s/user = total_token_throughput / concurrency`), so scoring both
+tok/s/user is recorded alongside for interpretation, but is not scored. It counts only output
+tokens (ISL and OSL are the measured input and output token totals), since those are what a user
+waits on. At a fixed workload shape and concurrency the two are proportional, so scoring both
 would count the same measurement twice; and at the highest operating point, scoring tok/s/user
 would reward a *smaller* KV cache, since it divides by the concurrency the hardware can sustain.
 

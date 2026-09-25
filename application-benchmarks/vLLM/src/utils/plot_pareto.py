@@ -107,10 +107,18 @@ def _prepare_records(
         if user_count is None:
             skipped += 1
             continue
+        # tok/s/user measures interactivity, i.e. the rate at which a user sees *output*
+        # tokens, so scale total throughput by OSL / (ISL + OSL) before dividing by users.
+        in_tokens = _get_numeric(record, ["total_input_tokens"])
+        out_tokens = _get_numeric(record, ["total_output_tokens"], allow_zero=False)
+        if in_tokens is None or out_tokens is None:
+            skipped += 1
+            continue
+        output_fraction = out_tokens / (in_tokens + out_tokens)
         gpu_count = _infer_gpu_count(record, gpu_count_var)
         prepared.append({
             **record,
-            "tokens_per_user": throughput / user_count,
+            "tokens_per_user": throughput * output_fraction / user_count,
             "tokens_per_gpu": throughput / gpu_count,
             "user_count_estimate": user_count,
             "gpu_count": gpu_count,
@@ -306,8 +314,8 @@ def _plot_fig(
 
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
-    # Axis labels make explicit that total (input+output) token throughput is used
-    ax.set_xlabel(f"Total tok/s/user  [{THROUGHPUT_KEY}]")
+    # Axis labels make explicit which token throughput each axis uses
+    ax.set_xlabel(f"Output tok/s/user  [{THROUGHPUT_KEY} × OSL/(ISL+OSL)]")
     ax.set_ylabel(f"Total tok/s/GPU  [{THROUGHPUT_KEY}]")
     ax.legend(fontsize=8)
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
