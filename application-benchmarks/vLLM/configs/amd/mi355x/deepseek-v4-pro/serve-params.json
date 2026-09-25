@@ -1,0 +1,11 @@
+[
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "trust-remote-code": true,
+    "tokenizer-mode": "deepseek_v4",
+    "enable-expert-parallel": false,
+    "_extra_serve_args": "-cc.max_cudagraph_capture_size=1024",
+    "tensor-parallel-size": 8,
+    "max_num_seqs": 1024
+  }
+]

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regenerate every benchmark dataset: 3 models × 3 workload shapes, n=1024 prompts each.
+# Regenerate every benchmark dataset: the scored model × each workload shape.
 #
 # Datasets are tokenizer-specific (token counts depend on the model's tokenizer), so each
 # model gets its own files. Output filenames match what the bench configs reference:
@@ -34,18 +34,22 @@ fi
 CONTAINER_EXEC="${CONTAINER_EXEC:-}"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
-NUM_REQUESTS="${NUM_REQUESTS:-1024}"
+# Each run needs num_prompts = 2 x max_concurrency, and the max batch size N is vendor-chosen
+# per layout, so the hosted files must cover the largest N anyone plausibly declares. 32768
+# prompts covers N up to 16384; raise it (and DATASET_SIZES in gen_configs.py) if that is ever
+# not enough. The count lands in the filename as the _n<N> suffix.
+NUM_REQUESTS="${NUM_REQUESTS:-32768}"
 OUT_DIR="$REPO_ROOT/datasets"
 GEN="$REPO_ROOT/scripts/generate_custom_dataset.py"
 
 # model short-name | tokenizer | extra generator flags
+# Datasets are tokenizer-specific, so only the scored model needs one. The unscored smoke-test
+# models in gen_configs.py need their own files if you run them; add them here temporarily.
 MODELS=(
-    "llama70b|nvidia/Llama-3.3-70B-Instruct-FP8|"
-    "gpt120b|openai/gpt-oss-120b|"
     "dsv4|deepseek-ai/DeepSeek-V4-Pro|--trust-remote-code"
 )
-# Fixed workload shapes: "input_len output_len"
-SHAPES=("1024 8192" "4608 4608" "8192 1024")
+# Fixed workload shapes: "input_len output_len". Both sum to 9216 = --max-model-len.
+SHAPES=("1024 8192" "8192 1024")
 
 for entry in "${MODELS[@]}"; do
     IFS='|' read -r short tokenizer extra <<<"$entry"

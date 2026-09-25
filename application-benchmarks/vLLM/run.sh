@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-shot benchmark runner: sweep every model for a cluster, then plot + score.
+# One-shot benchmark runner: run every measurement for a cluster, then plot + score.
 #
 #   ./run.sh <cluster> [--local] [--dry-run]
 #
@@ -10,7 +10,7 @@
 #   --dry-run        print the worker allocation each model would request and exit;
 #                    submits nothing, needs no GPUs. Implies --local.
 #
-# Requires SLURM: workers are sbatch jobs (multi-node via srun + Ray). The orchestrator runs
+# Requires SLURM: one sbatch job per measurement (multi-node via srun + Ray). The orchestrator runs
 # here (--local, e.g. on a login/interactive node) or as a submitted job (default).
 # Datasets are downloaded from the organisers (see README §4) and must not be regenerated.
 #
@@ -53,7 +53,7 @@ echo "Cluster:        $CLUSTER  (GPUS_PER_NODE=${GPUS_PER_NODE:-?})"
 echo "Models:        $(find "$CONFIG_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f ' )"
 echo "Worker sbatch: ${SBATCH_ARGS:-<none>}"
 
-# ── run the sweep + plot + score ──────────────────────────────────────────────
+# ── run every measurement + plot + score ──────────────────────────────────────
 if [ "$LOCAL" -eq 1 ]; then
     echo "Running orchestrator locally ..."
     CLUSTER="$CLUSTER" bash scripts/vllm_sweep_parallel.sh

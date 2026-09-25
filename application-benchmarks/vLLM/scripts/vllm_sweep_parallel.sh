@@ -1,5 +1,5 @@
 #!/bin/bash
-# Orchestrator job: sweeps every model for one cluster, then plots + scores.
+# Orchestrator job: runs every operating point for one cluster, then plots + scores.
 #
 # Usually launched via ./run.sh <cluster>, but can be submitted directly:
 #     CLUSTER=snellius/h100 sbatch scripts/vllm_sweep_parallel.sh
@@ -55,16 +55,18 @@ BENCH_CMD="vllm bench serve
   --percentile-metrics=ttft,tpot,itl,e2el
   --ready-check-timeout-sec=600"
 
-# ── run parallel sweep over all models in the cluster ─────────────────────────
+# ── run every (layout, operating point, shape) in the cluster ─────────────────
 mkdir -p logs
 RESULTS_DIR="${RESULTS_DIR:-results/$(date +%Y%m%d_%H%M%S)}"
 
 # Orchestrator runs on the host python (needs sbatch/squeue/sacct), NOT in the container.
-/usr/bin/python3.11 "$REPO_ROOT/src/sweep_parallel.py" \
+# The interpreter differs per cluster, so system.sh may set ORCH_PYTHON; plain `python3` is the
+# default. sweep_parallel.py parses on Python 3.7+.
+${ORCH_PYTHON:-python3} "$REPO_ROOT/src/sweep_parallel.py" \
     --config-root="$CONFIG_ROOT" \
     --serve-cmd="$SERVE_CMD" \
     --bench-cmd="$BENCH_CMD" \
-    --link-vars="max_num_seqs=max_concurrency,model=model" \
+    --link-vars="model=model,max_num_seqs=_n" \
     --results-dir="$RESULTS_DIR" \
     --dataset-dir="$DATASET_DIR" \
     --gpus-per-node="${GPUS_PER_NODE:-0}" \
@@ -81,6 +83,7 @@ if [ -n "${DRY_RUN:-}" ]; then
 fi
 
 # ── plot + score (need pandas/matplotlib → run inside the container) ───────────
+# Visual sanity check only — the score comes from score.py, not from the plot.
 ${CONTAINER_EXEC:-} python3 "$REPO_ROOT/src/utils/plot_pareto.py" "$RESULTS_DIR" \
     --fig-by=model --curve-by=custom-output-len || echo "[warn] plotting failed"
 

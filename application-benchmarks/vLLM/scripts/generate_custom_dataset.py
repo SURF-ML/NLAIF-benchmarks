@@ -21,7 +21,7 @@ Usage:
         --input-len 2048 \\
         --output-len 512 \\
         --range-ratio 0.1 \\
-        --tokenizer nvidia/Llama-3.3-70B-Instruct-FP8 \\
+        --tokenizer deepseek-ai/DeepSeek-V4-Pro --trust-remote-code \\
         --output my_dataset.jsonl
 """
 
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tokenizer",
         type=str,
-        default="nvidia/Llama-3.3-70B-Instruct-FP8",
+        default="deepseek-ai/DeepSeek-V4-Pro",
         help="HuggingFace tokenizer name or local path",
     )
     parser.add_argument(

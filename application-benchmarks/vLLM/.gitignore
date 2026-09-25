@@ -1,0 +1,18 @@
+# Benchmark inputs and outputs — never committed.
+# No trailing slashes: `datasets` here is a symlink to shared storage, and a pattern
+# ending in `/` matches directories only, which would let the symlink through.
+datasets
+results
+logs
+tmp
+
+# Container images are built locally (containers/build_vllm_bench.slurm) and are large.
+*.sif
+*.tar
+
+# SLURM job output, which lands wherever sbatch was invoked.
+slurm-*.out
+slurm-*.err
+
+__pycache__
+*.py[cod]
