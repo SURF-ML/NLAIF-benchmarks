@@ -22,6 +22,15 @@ RUNS = [
     # One run dir, two layouts: '#ep8' / '#ep1' selects a layout's cells from summary.json.
     ("N=512 v0.29 EP8", "results/*_amd-mi355x-1node-n512#ep8", "v0.29.0", "8", "W4A8", "yes"),
     ("N=512 v0.29 EP1", "results/*_amd-mi355x-1node-n512#ep1", "v0.29.0", "1", "W4A8", "yes"),
+    ("N=512 v0.30 EP8", "results/*_amd-mi355x-1node-n512-v030#ep8", "v0.30.0", "8", "W4A8", "yes"),
+    ("N=512 v0.30 EP1", "results/*_amd-mi355x-1node-n512-v030#ep1", "v0.30.0", "1", "W4A8", "yes"),
+    # N=1024 ran mid/high only: its low point (concurrency 1) does not depend on N.
+    ("N=1024 v0.29 EP1", "results/*_amd-mi355x-1node-n1024#ep1", "v0.29.0", "1", "W4A8", "yes"),
+    ("N=1024 v0.30 EP1", "results/*_amd-mi355x-1node-n1024-v030#ep1", "v0.30.0", "1", "W4A8", "yes"),
+    # Same, with CUDA graphs captured up to batch 1024 (-cc.max_cudagraph_capture_size=1024);
+    # only the 1024→8192 high cell was run, the one the default cap of 512 held back.
+    ("N=1024 v0.29 EP1 cg1024", "results/*_amd-mi355x-1node-n1024-cg1024#ep1", "v0.29.0", "1", "W4A8", "yes"),
+    ("N=1024 v0.30 EP1 cg1024", "results/*_amd-mi355x-1node-n1024-v030-cg1024#ep1", "v0.30.0", "1", "W4A8", "yes"),
 ]
 
 def load(pattern):
@@ -73,7 +82,12 @@ def kv_line(run_dir):
 # per cell): the two-node runs, and the single-node N=512 run as power/latency reference.
 TWO_NODE_RUNS = ["results/*_amd-mi355x-2node-rdma-n1024",    # TP8/PP2, measured N
                  "results/*_amd-mi355x-2node-rdma-sweep"]    # other layouts, stopped early
-ONE_NODE_RUN = "results/*_amd-mi355x-1node-n512"             # TP8 EP8+EP1, N=512 @ 0.97
+ONE_NODE_RUNS = [("v0.29", "results/*_amd-mi355x-1node-n512"),        # TP8 EP8+EP1 @ 0.97
+                 ("v0.30", "results/*_amd-mi355x-1node-n512-v030"),
+                 ("v0.29", "results/*_amd-mi355x-1node-n1024"),       # TP8 EP1
+                 ("v0.30", "results/*_amd-mi355x-1node-n1024-v030"),
+                 ("v0.29 cg1024", "results/*_amd-mi355x-1node-n1024-cg1024"),
+                 ("v0.30 cg1024", "results/*_amd-mi355x-1node-n1024-v030-cg1024")]
 
 
 def _newest(pattern):
@@ -146,8 +160,13 @@ def two_node_section(A, data, shapes):
             cells.update(load_cells(run))
     if not cells:
         return
-    one = _newest(ONE_NODE_RUN)
-    one_cells = load_cells(one) if one else {}
+    # Single-node per-cell runs: (engine, layout, N) -> {(layout, in, out, point): record}
+    one_runs = {}
+    for eng, pat in ONE_NODE_RUNS:
+        run = _newest(pat)
+        for k, r in (load_cells(run) if run else {}).items():
+            one_runs.setdefault((eng, k[0], r["n"]), {})[k] = r
+    one_cells = one_runs.get(("v0.29", (8, 1, True), 512), {})   # same engine as the 2-node runs
     # Layout order: most TP first, EP on before off.
     layouts = sorted({k[0] for k in cells}, key=lambda l: (-l[0], not l[2]))
     n_of = {l: next(r["n"] for k, r in cells.items() if k[0] == l) for l in layouts}
@@ -238,9 +257,9 @@ def two_node_section(A, data, shapes):
     A("")
 
     # Power: every per-cell run, one node and two.
-    cols = [("1 node " + _layout_label(l).split(" ", 1)[1] + f" N={r['n']}", l, one_cells)
-            for l, r in {k[0]: v for k, v in one_cells.items()}.items()]
-    cols = sorted(cols, key=lambda c: not c[1][2]) + [(lab(l), l, cells) for l in layouts]
+    cols = [(f"1 node {e} {_layout_label(l).split(' ', 1)[1]} N={n}", l, src)
+            for (e, l, n), src in sorted(one_runs.items(), key=lambda x: (x[0][2], x[0][0], not x[0][1][2]))]
+    cols += [(lab(l), l, cells) for l in layouts]
     if any(r["watts"] for c in cols for k, r in c[2].items() if k[0] == c[1]):
         A("## Power\n")
         A("Mean GPU package power over each cell's bench window only (engine load excluded), "
@@ -295,8 +314,9 @@ def main():
         A(f"| {label} | {eng} | {ep} | {prec} | {kvs}{warn} | {sub} |")
     A("")
     A("† vLLM's startup capacity line is a worst-case reservation, not the real ceiling, for "
-      "DeepSeek-V4 (README §4). N=512 was measured instead: 512 requests run with ~21% KV-cache "
-      "usage and no preemption (troubleshooting §12.6). The N=16/N=32 rows took N from that line.\n")
+      "DeepSeek-V4 (README §4). N=512 and N=1024 were measured instead: 1024 requests run with at "
+      "most ~50% KV-cache usage and no preemption (troubleshooting §12.6). The N=16/N=32 rows took N "
+      "from that line.\n")
 
     A("## Engine version comparison\n")
     A("Same six cells, same node, same TP8 layout and N=32 @ GPU_MEM_UTIL=0.97 — only the "
@@ -431,6 +451,107 @@ def main():
             A(f"\nWorst-case disagreement across {len(common)} shared cells: "
               f"**{worst:.1f}%**.\n")
 
+    # N=1024 vs N=512 on one node: the `high` point doubles from 512 to 1024.
+    big = [(e, f"N=512 {e} EP1", f"N=1024 {e} EP1") for e in ("v0.29", "v0.30")]
+    big = [b for b in big if b[1] in data and b[2] in data]
+    if big:
+        cap = None
+        for log in sorted(data[big[0][2]][1].glob("*/serve.log")):
+            m = re.search(r"max_cudagraph_capture_size'?: (\d+)", log.read_text(errors="ignore"))
+            if m:
+                cap = int(m.group(1)); break
+        A("## One node at N=1024\n")
+        A("TP8 EP1, concurrency 512 (the N=512 `high` point) against concurrency 1024 (the N=1024 "
+          "`high` point). At concurrency 512 the two Ns agree within 0.6% in every cell, so the "
+          "columns differ only in load. 1024 requests run without preemption on both shapes "
+          "(troubleshooting §12.6).\n")
+        A("| shape | engine | concurrency 512 | concurrency 1024 | change | concurrency 1024, graphs ≤1024 | change |")
+        A("|---|---|---|---|---|---|---|")
+        for i_len, o_len in shapes:
+            for e, a, b in big:
+                x = data[a][0].get((i_len, o_len, "high")); y = data[b][0].get((i_len, o_len, "high"))
+                g = data.get(f"{b} cg1024", ({},))[0].get((i_len, o_len, "high"))
+                if x and y:
+                    A(f"| {i_len}→{o_len} | {e}.0 | {x:,.1f} | {y:,.1f} | {(y/x-1)*100:+.1f}% | "
+                      + (f"**{g:,.1f}** | **{(g/x-1)*100:+.1f}%** |" if g else "— | — |"))
+        A(f"\n8192→1024 still gains from the extra load. 1024→8192 loses throughput at vLLM's "
+          f"default CUDA-graph capture limit (`max_cudagraph_capture_size` = {cap or '?'}, from "
+          f"`serve.log`): its steps are decode, and decode batches above the limit run without "
+          f"full CUDA graphs. Raising the limit to 1024 (`-cc.max_cudagraph_capture_size=1024`, a "
+          f"§8.3 graph-capture tunable; configs `amd/mi355x-1node-n1024{{,-v030}}-cg1024`) turns "
+          f"that loss into the largest gain from concurrency 512 to 1024 in the table.\n")
+        # The flag at the lower points: it should change nothing where batches stay ≤ 512.
+        d = []
+        for e, a, b in big:
+            g = data.get(f"{b} cg1024", ({},))[0]
+            for pt in ("low", "mid"):
+                k = ("1024", "8192", pt)
+                if k in g and k in data[b][0]:
+                    d.append(abs(g[k] / data[b][0][k] - 1) * 100)
+        if d:
+            A(f"At the 1024→8192 `low` and `mid` points (concurrency 1 and 512) the raised limit "
+              f"changes throughput by at most {max(d):.1f}%, on both engines: those batches already "
+              f"fit the default limit.\n")
+
+    # MXFP4 W4A4: AMD's MXFP4 checkpoint on the zenith_for_SURF vLLM build. Raw `vllm bench serve`
+    # JSONs (no layout keys), so shape comes from the file name; 1 node TP8 throughout.
+    zr = _newest("results/*_amd-mi355x-1node-zenith-w4a4")
+    if zr:
+        w4 = {}
+        for f in sorted(zr.glob("w4a4_*_c*.json")):
+            m = re.match(r"w4a4_(1k8k|8k1k)_c(\d+)\.json", f.name)
+            if not m:
+                continue
+            d = json.loads(f.read_text())
+            shp = ("1024", "8192") if m.group(1) == "1k8k" else ("8192", "1024")
+            w4[(shp, int(m.group(2)))] = d
+        if w4:
+            A("## MXFP4 W4A4 on the Zenith build\n")
+            A("> ⚠ **Not an apples-to-apples comparison.** These runs use a different code base, "
+              "container, launcher, checkpoint and kernel stack from every other result in this "
+              "document. Only the client side was held equal. Treat the differences below as "
+              "indicative of the W4A4 path's behaviour, not as a measured W4A4-vs-W4A8 effect.\n")
+            A("| | these runs (MXFP4 W4A4) | W4A8 rows above |")
+            A("|---|---|---|")
+            A("| engine | vLLM `bc0f47cd0` built from source by `zenith_for_SURF`, plus its source patches | official `vllm/vllm-openai-rocm` v0.29.0 / v0.30.0 images |")
+            A("| container / launcher | Zenith image, Ray head container, `zenith_container_launcher.sh` | NLAIF harness workers (`src/sweep_parallel.py`) |")
+            A("| engine lifetime | one server per node, several benchmarks back to back | a fresh engine per measurement |")
+            A("| checkpoint | `amd/DeepSeek-V4-Pro-MXFP4` (experts re-quantized by AMD) | `deepseek-ai/DeepSeek-V4-Pro` |")
+            A("| MoE numerics / kernels | W4A4, `aiter_mxfp4_mxfp4`, AITER shared-expert fusion on | W4A8, default MoE backend, no fusion |")
+            A("| memory sizing | `kv_cache_sizing.py` → `GPU_MEM_UTIL` 0.968 | `GPU_MEM_UTIL` 0.97 |")
+            A("| other serve defaults | that build's own (compilation, scheduling) | the release's own |")
+            A("| node | concurrency 512 on gpu-37, concurrency 1 on gpu-13 (weights in `/dev/shm`) | either node |")
+            A("| **held equal** | benchmark client and flags, datasets, concurrency, `max-model-len` = `max-num-batched-tokens` = 9216, `max_num_seqs` 512, 1 node TP8 EP off, MTP off | |")
+            A("")
+            A("AMD's checkpoint was served with MXFP4 *activations* as well as weights: `--kernel-config "
+              "{\"moe_backend\":\"aiter_mxfp4_mxfp4\"}`; the engine log confirms `Using "
+              "'AITER_MXFP4_MXFP4' Mxfp4 MoE backend` (`serve_*.log` in the run directory). Shared-expert "
+              "fusion is required because the checkpoint's FP4-packed shared expert only loads fused; "
+              "MTP is off because its MTP block does not load with fusion.\n")
+            A("**Not submittable:** a non-official image built from source with patches (§8.5), a "
+              "different checkpoint (§3/§8.1), and additional activation quantization (§8.5).\n")
+            A("| shape | concurrency | W4A4 tok/s/GPU | TPOT (ms) | W4A8 v0.29 EP1 N=512 | W4A8 v0.30 EP1 N=512 | difference (not A/B) |")
+            A("|---|---|---|---|---|---|---|")
+            for shp in shapes:
+                for conc, pt in ((1, "low"), (512, "high")):
+                    d = w4.get((shp, conc))
+                    if not d:
+                        continue
+                    t = d["total_token_throughput"] / 8
+                    refs = [data[l][0].get((*shp, pt)) for l in ("N=512 v0.29 EP1", "N=512 v0.30 EP1")
+                            if l in data]
+                    best = max((r for r in refs if r), default=None)
+                    A(f"| {shp[0]}→{shp[1]} | {conc} | **{t:,.1f}** | {d['median_tpot_ms']:.1f} | "
+                      + " | ".join(f"{r:,.1f}" if r else "—" for r in refs)
+                      + (f" | **{(t/best-1)*100:+.0f}%** |" if best else " | — |"))
+            A("\nThe W4A4 runs are slower in every cell, most at low load: a single stream decodes at "
+              "~31–33 ms per token against ~15 ms, consistent with the per-step activation quantization "
+              "adding a fixed cost that batching does not amortize, and the gap is smallest on the "
+              "prefill-bound 8192→1024 shape at high load. Because everything in the table above "
+              "changes at once, none of these differences can be attributed to W4A4 alone. "
+              "(`zenith_for_SURF`'s own finding that W4A4 wins at concurrency 1 was against a W4A16 "
+              "baseline with MTP on, on its own build.)\n")
+
     two_node_section(A, data, shapes)
 
     # External comparison: SemiAnalysis InferenceX. Their dashboard's own API carries the
@@ -445,24 +566,33 @@ def main():
         A("Their `8192→1024` shape matches ours exactly. (Their other shape is 1024→1024; ours is "
           "1024→8192, so those do not compare.) Each row compares at equal concurrency: our N=32 "
           "configs at their 16/32, our N=512 configs at their 256/512.\n")
-        A("| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |")
+        A("| conc | our point | SemiAnalysis | ours v0.29 (best EP) | ours v0.30 (best EP) | best ours vs SA |")
         A("|---|---|---|---|---|---|")
         gaps = []
         for conc, pt, n in ((16, "mid", "N=32 "), (32, "high", "N=32 "),
                             (256, "mid", "N=512"), (512, "high", "N=512")):
             r = rec.get((8192, 1024, conc))
-            e8, e1 = data.get(f"{n} v0.29 EP8"), data.get(f"{n} v0.29 EP1")
             k = ("8192", "1024", pt)
-            if not (r and e8 and e1 and k in e8[0] and k in e1[0]):
+            per = []
+            for eng in ("v0.29", "v0.30"):
+                v = [data[l][0][k] for l in (f"{n} {eng} EP8", f"{n} {eng} EP1")
+                     if l in data and k in data[l][0]]
+                per.append(max(v) if v else None)
+            if not r or not any(per):
                 continue
             theirs = r["metrics"]["tput_per_gpu"]
-            a8, a1 = e8[0][k], e1[0][k]
-            gaps.append((max(a8, a1) / theirs - 1) * 100)
-            A(f"| {conc} | {pt} ({n.strip()}) | {theirs:,.1f} | {a8:,.1f} | {a1:,.1f} | "
-              f"**{(max(a8, a1)/theirs-1)*100:+.1f}%** |")
+            best = max(v for v in per if v)
+            gaps.append([(v / theirs - 1) * 100 if v else None for v in per])
+            A(f"| {conc} | {pt} ({n.strip()}) | {theirs:,.1f} | "
+              + " | ".join(f"{v:,.1f}" if v else "—" for v in per)
+              + f" | **{(best / theirs - 1) * 100:+.1f}%** |")
         if gaps:
-            A(f"\nAll tok/s/GPU. **The two independent implementations agree to within "
-              f"{max(abs(g) for g in gaps):.1f}% at every shared concurrency**, from 16 to 512.\n")
+            rng = lambda i: [g[i] for g in gaps if g[i] is not None]
+            g29, g30 = rng(0), rng(1)
+            A(f"\nAll tok/s/GPU. On the same release family as theirs (v0.30.0 contains their "
+              f"nightly) we are **{min(g30):+.1f}% to {max(g30):+.1f}%** against them at every shared "
+              f"concurrency from 16 to 512; on v0.29.0, {min(g29):+.1f}% to {max(g29):+.1f}%. The "
+              f"two independent harnesses measure the same hardware consistently.\n")
         A("How they reach concurrency 512 on one node: their serve command "
           "(`benchmarks/single_node/fixed_seq_len/deprecated/dsv4_fp4_mi355x_vllm.sh` in "
           "InferenceX) sets no `--max-num-seqs`, so vLLM's default for ≥160 GB GPUs, 1024, "

@@ -139,7 +139,7 @@ grep "Maximum concurrency" results/<run>/*/serve.log
 ```
 
 **Superseded (§12.6):** that line turned out to be a worst-case bound, not the real capacity.
-Measured, one node sustains N=512 with ~21% KV-cache usage and no preemption.
+Measured, one node sustains N=1024 with at most ~50% KV-cache usage and no preemption.
 
 ---
 
@@ -463,6 +463,7 @@ line is a worst-case reservation and understates what fits by one to two orders 
 | deployment | reported capacity | requests running | KV-cache usage | preemptions |
 |---|---|---|---|---|
 | 1 node, TP8, N=512 | 31.16x | 512 (1024→8192) | 21% | 0 |
+| 1 node, TP8, N=1024 | 31.16x (v0.29) / 32.31x (v0.30) | 1024 (1024→8192) | 44–50% | 0 |
 | 2 nodes, TP8/PP2, N=1024 | 76.71x | 1024 (1024→8192) | 17% | 0 |
 | 2 nodes, TP2/PP8, N=256 | 293.71x | 256 (1024→8192) | 1.5% | 0 |
 
@@ -480,10 +481,13 @@ EP on or off moves both figures by <1%. Two related effects:
   timestamp to the second; two orchestrators started in the same second share it, *and* share
   `tmp/<same>/bench_<i>.json`, so one sweep's jobs silently run the other's operating points.
   Set `RESULTS_DIR=results/<stamp>_<name>` per launch.
-- **Leave a moment after cancelling a job before starting another on the same node** at
-  `GPU_MEM_UTIL=0.97`: the cancelled engine's memory is still being released, and the new
-  engine's profile run fails with `HIP failure: 'out of memory'`. `scontrol requeue <job>` then
-  re-runs the cell with its original id and output paths.
+- **`scancel` does not stop a running worker's container.** Rootless podman runs it under
+  `conmon` in the user's systemd session, outside the SLURM job's processes, so a cancelled
+  worker's engine keeps running and keeps its GPU memory. The next job on that node then fails
+  at startup: `Free memory on device cuda:N (171.88/287.98 GiB) on startup is less than desired
+  GPU memory utilization`, or `HIP failure: 'out of memory'` in the profile run. After cancelling,
+  check `podman ps` on the node and remove leftovers by ID (`podman rm -f <id>`); then
+  `scontrol requeue <job>` re-runs the failed cell with its original id and output paths.
 - **The final plot/score step needs the container**, and the control node has no podman. After
   a `--local` run, score from any compute node:
   ```bash

@@ -17,8 +17,14 @@ Platform: 8× Instinct MI355X (288 GiB, gfx950), ROCm 7.2, rootless podman. The 
 | N=32  v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.70x | yes |
 | N=512 v0.29 EP8 | v0.29.0 | 8 | W4A8 | 31.16x (below N †) | yes |
 | N=512 v0.29 EP1 | v0.29.0 | 1 | W4A8 | 31.16x (below N †) | yes |
+| N=512 v0.30 EP8 | v0.30.0 | 8 | W4A8 | 32.30x (below N †) | yes |
+| N=512 v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.30x (below N †) | yes |
+| N=1024 v0.29 EP1 | v0.29.0 | 1 | W4A8 | 31.16x (below N †) | yes |
+| N=1024 v0.30 EP1 | v0.30.0 | 1 | W4A8 | 32.31x (below N †) | yes |
+| N=1024 v0.29 EP1 cg1024 | v0.29.0 | 1 | W4A8 | 30.72x (below N †) | yes |
+| N=1024 v0.30 EP1 cg1024 | v0.30.0 | 1 | W4A8 | 32.60x (below N †) | yes |
 
-† vLLM's startup capacity line is a worst-case reservation, not the real ceiling, for DeepSeek-V4 (README §4). N=512 was measured instead: 512 requests run with ~21% KV-cache usage and no preemption (troubleshooting §12.6). The N=16/N=32 rows took N from that line.
+† vLLM's startup capacity line is a worst-case reservation, not the real ceiling, for DeepSeek-V4 (README §4). N=512 and N=1024 were measured instead: 1024 requests run with at most ~50% KV-cache usage and no preemption (troubleshooting §12.6). The N=16/N=32 rows took N from that line.
 
 ## Engine version comparison
 
@@ -52,15 +58,15 @@ The 8192→1024 `mid` cell is the one cell EP1 lost on v0.29.0, reproduced acros
 
 ## tok/s/GPU by cell
 
-| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.29 EP1 | N=32  v0.23 EP8 | N=32  v0.23 EP1 | N=32  v0.30 EP8 | N=32  v0.30 EP1 | N=512 v0.29 EP8 | N=512 v0.29 EP1 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 8192→1024 | low | 67.9 | 67.9 | 72.0 | 25.2 | 25.6 | 69.8 | 74.7 | 67.9 | 71.8 |
-| 8192→1024 | mid | 411.2 | 690.7 | 632.6 | 112.5 | 112.3 | 725.2 | 791.7 | 2,177.9 | 2,278.6 |
-| 8192→1024 | high | 691.5 | 1,052.7 | 1,127.0 | 112.4 | 112.5 | 1,137.3 | 1,216.5 | 2,457.4 | 2,544.0 |
-| 1024→8192 | low | 8.8 | 8.7 | 9.3 | 3.3 | 3.4 | 9.0 | 9.6 | 8.8 | 9.3 |
-| 1024→8192 | mid | 59.5 | 107.4 | 115.5 | 45.7 | 45.8 | 109.9 | 124.8 | 817.6 | 858.3 |
-| 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 | 200.1 | 219.2 | 1,218.3 | 1,261.9 |
-| **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** | **375.2** | **406.1** | **1,124.6** | **1,170.6** |
+| shape | point | N=16  v0.29 EP8 | N=32  v0.29 EP8 | N=32  v0.29 EP1 | N=32  v0.23 EP8 | N=32  v0.23 EP1 | N=32  v0.30 EP8 | N=32  v0.30 EP1 | N=512 v0.29 EP8 | N=512 v0.29 EP1 | N=512 v0.30 EP8 | N=512 v0.30 EP1 | N=1024 v0.29 EP1 | N=1024 v0.30 EP1 | N=1024 v0.29 EP1 cg1024 | N=1024 v0.30 EP1 cg1024 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 8192→1024 | low | 67.9 | 67.9 | 72.0 | 25.2 | 25.6 | 69.8 | 74.7 | 67.9 | 71.8 | 69.9 | 74.8 | — | — | — | — |
+| 8192→1024 | mid | 411.2 | 690.7 | 632.6 | 112.5 | 112.3 | 725.2 | 791.7 | 2,177.9 | 2,278.6 | 2,359.1 | 2,487.0 | 2,552.1 | 2,785.3 | — | — |
+| 8192→1024 | high | 691.5 | 1,052.7 | 1,127.0 | 112.4 | 112.5 | 1,137.3 | 1,216.5 | 2,457.4 | 2,544.0 | 2,643.9 | 2,781.8 | 2,643.6 | 2,897.2 | — | — |
+| 1024→8192 | low | 8.8 | 8.7 | 9.3 | 3.3 | 3.4 | 9.0 | 9.6 | 8.8 | 9.3 | 9.0 | 9.6 | — | — | 9.3 | 9.6 |
+| 1024→8192 | mid | 59.5 | 107.4 | 115.5 | 45.7 | 45.8 | 109.9 | 124.8 | 817.6 | 858.3 | 847.6 | 885.8 | 1,260.8 | 1,236.6 | 1,254.1 | 1,234.5 |
+| 1024→8192 | high | 104.8 | 190.1 | 206.2 | 84.2 | 84.3 | 200.1 | 219.2 | 1,218.3 | 1,261.9 | 1,207.0 | 1,229.6 | 1,154.3 | 1,113.3 | 1,621.1 | 1,437.4 |
+| **mean** | | **223.9** | **352.9** | **360.4** | **63.9** | **64.0** | **375.2** | **406.1** | **1,124.6** | **1,170.6** | **1,189.4** | **1,244.8** | — | — | — | — |
 
 ## Submission recommendation
 
@@ -68,15 +74,15 @@ Submittable here means a stable vLLM release and W4A8 MoE precision. §9 ruling 
 
 | shape | point | best | from |
 |---|---|---|---|
-| 8192→1024 | low | **74.7** | N=32  v0.30 EP1 |
-| 8192→1024 | mid | **2,278.6** | N=512 v0.29 EP1 |
-| 8192→1024 | high | **2,544.0** | N=512 v0.29 EP1 |
-| 1024→8192 | low | **9.6** | N=32  v0.30 EP1 |
-| 1024→8192 | mid | **858.3** | N=512 v0.29 EP1 |
-| 1024→8192 | high | **1,261.9** | N=512 v0.29 EP1 |
-| **mean** | | **1,171.2** | |
+| 8192→1024 | low | **74.8** | N=512 v0.30 EP1 |
+| 8192→1024 | mid | **2,785.3** | N=1024 v0.30 EP1 |
+| 8192→1024 | high | **2,897.2** | N=1024 v0.30 EP1 |
+| 1024→8192 | low | **9.6** | N=1024 v0.30 EP1 cg1024 |
+| 1024→8192 | mid | **1,260.8** | N=1024 v0.29 EP1 |
+| 1024→8192 | high | **1,621.1** | N=1024 v0.29 EP1 cg1024 |
+| **mean** | | **1,441.5** | |
 
-Envelope is +231.8% over the v0.29.0 EP8 baseline.
+Envelope is +308.4% over the v0.29.0 EP8 baseline.
 
 ## Cross-node reproducibility
 
@@ -90,6 +96,50 @@ The same EP1 config run independently on mi355-gpu-13 and mi355-gpu-37 (4 overla
 | 1024→8192 | mid | 115.5 | 115.9 | 0.3% |
 
 Worst-case disagreement across 4 shared cells: **0.3%**.
+
+## One node at N=1024
+
+TP8 EP1, concurrency 512 (the N=512 `high` point) against concurrency 1024 (the N=1024 `high` point). At concurrency 512 the two Ns agree within 0.6% in every cell, so the columns differ only in load. 1024 requests run without preemption on both shapes (troubleshooting §12.6).
+
+| shape | engine | concurrency 512 | concurrency 1024 | change | concurrency 1024, graphs ≤1024 | change |
+|---|---|---|---|---|---|---|
+| 8192→1024 | v0.29.0 | 2,544.0 | 2,643.6 | +3.9% | — | — |
+| 8192→1024 | v0.30.0 | 2,781.8 | 2,897.2 | +4.1% | — | — |
+| 1024→8192 | v0.29.0 | 1,261.9 | 1,154.3 | -8.5% | **1,621.1** | **+28.5%** |
+| 1024→8192 | v0.30.0 | 1,229.6 | 1,113.3 | -9.5% | **1,437.4** | **+16.9%** |
+
+8192→1024 still gains from the extra load. 1024→8192 loses throughput at vLLM's default CUDA-graph capture limit (`max_cudagraph_capture_size` = 512, from `serve.log`): its steps are decode, and decode batches above the limit run without full CUDA graphs. Raising the limit to 1024 (`-cc.max_cudagraph_capture_size=1024`, a §8.3 graph-capture tunable; configs `amd/mi355x-1node-n1024{,-v030}-cg1024`) turns that loss into the largest gain from concurrency 512 to 1024 in the table.
+
+At the 1024→8192 `low` and `mid` points (concurrency 1 and 512) the raised limit changes throughput by at most 0.5%, on both engines: those batches already fit the default limit.
+
+## MXFP4 W4A4 on the Zenith build
+
+> ⚠ **Not an apples-to-apples comparison.** These runs use a different code base, container, launcher, checkpoint and kernel stack from every other result in this document. Only the client side was held equal. Treat the differences below as indicative of the W4A4 path's behaviour, not as a measured W4A4-vs-W4A8 effect.
+
+| | these runs (MXFP4 W4A4) | W4A8 rows above |
+|---|---|---|
+| engine | vLLM `bc0f47cd0` built from source by `zenith_for_SURF`, plus its source patches | official `vllm/vllm-openai-rocm` v0.29.0 / v0.30.0 images |
+| container / launcher | Zenith image, Ray head container, `zenith_container_launcher.sh` | NLAIF harness workers (`src/sweep_parallel.py`) |
+| engine lifetime | one server per node, several benchmarks back to back | a fresh engine per measurement |
+| checkpoint | `amd/DeepSeek-V4-Pro-MXFP4` (experts re-quantized by AMD) | `deepseek-ai/DeepSeek-V4-Pro` |
+| MoE numerics / kernels | W4A4, `aiter_mxfp4_mxfp4`, AITER shared-expert fusion on | W4A8, default MoE backend, no fusion |
+| memory sizing | `kv_cache_sizing.py` → `GPU_MEM_UTIL` 0.968 | `GPU_MEM_UTIL` 0.97 |
+| other serve defaults | that build's own (compilation, scheduling) | the release's own |
+| node | concurrency 512 on gpu-37, concurrency 1 on gpu-13 (weights in `/dev/shm`) | either node |
+| **held equal** | benchmark client and flags, datasets, concurrency, `max-model-len` = `max-num-batched-tokens` = 9216, `max_num_seqs` 512, 1 node TP8 EP off, MTP off | |
+
+AMD's checkpoint was served with MXFP4 *activations* as well as weights: `--kernel-config {"moe_backend":"aiter_mxfp4_mxfp4"}`; the engine log confirms `Using 'AITER_MXFP4_MXFP4' Mxfp4 MoE backend` (`serve_*.log` in the run directory). Shared-expert fusion is required because the checkpoint's FP4-packed shared expert only loads fused; MTP is off because its MTP block does not load with fusion.
+
+**Not submittable:** a non-official image built from source with patches (§8.5), a different checkpoint (§3/§8.1), and additional activation quantization (§8.5).
+
+| shape | concurrency | W4A4 tok/s/GPU | TPOT (ms) | W4A8 v0.29 EP1 N=512 | W4A8 v0.30 EP1 N=512 | difference (not A/B) |
+|---|---|---|---|---|---|---|
+| 8192→1024 | 1 | **33.5** | 33.2 | 71.8 | 74.8 | **-55%** |
+| 8192→1024 | 512 | **2,446.2** | 217.9 | 2,544.0 | 2,781.8 | **-12%** |
+| 1024→8192 | 1 | **4.5** | 31.0 | 9.3 | 9.6 | **-53%** |
+| 1024→8192 | 512 | **999.3** | 71.1 | 1,261.9 | 1,229.6 | **-21%** |
+
+The W4A4 runs are slower in every cell, most at low load: a single stream decodes at ~31–33 ms per token against ~15 ms, consistent with the per-step activation quantization adding a fixed cost that batching does not amortize, and the gap is smallest on the prefill-bound 8192→1024 shape at high load. Because everything in the table above changes at once, none of these differences can be attributed to W4A4 alone. (`zenith_for_SURF`'s own finding that W4A4 wins at concurrency 1 was against a W4A16 baseline with MTP on, on its own build.)
 
 ## Two nodes: 16× MI355X over RDMA
 
@@ -109,11 +159,11 @@ Concurrency in brackets: operating points are fractions of each layout's own N. 
 | shape | point | TP8/PP2 EP8 N=1024 | TP2/PP8 EP2 N=256 | 1 node, best | 2 nodes vs 1 node |
 |---|---|---|---|---|---|
 | 8192→1024 | low | — | 24.6 (1) | 72.0 (N=32  v0.29 EP1) | **-66%** |
-| 8192→1024 | mid | 1,224.0 (512) | 347.6 (128) | 2,278.6 (N=512 v0.29 EP1) | **-46%** |
-| 8192→1024 | high | — | — | 2,544.0 (N=512 v0.29 EP1) | — |
+| 8192→1024 | mid | 1,224.0 (512) | 347.6 (128) | 2,552.1 (N=1024 v0.29 EP1) | **-52%** |
+| 8192→1024 | high | — | — | 2,643.6 (N=1024 v0.29 EP1) | — |
 | 1024→8192 | low | — | 3.2 (1) | 9.3 (N=512 v0.29 EP1) | **-65%** |
-| 1024→8192 | mid | 602.9 (512) | 110.7 (128) | 858.3 (N=512 v0.29 EP1) | **-30%** |
-| 1024→8192 | high | 765.4 (1024) | 162.7 (256) | 1,261.9 (N=512 v0.29 EP1) | **-39%** |
+| 1024→8192 | mid | 602.9 (512) | 110.7 (128) | 1,260.8 (N=1024 v0.29 EP1) | **-52%** |
+| 1024→8192 | high | 765.4 (1024) | 162.7 (256) | 1,621.1 (N=1024 v0.29 EP1 cg1024) | **-53%** |
 
 ### Same load on one node and on two
 
@@ -141,14 +191,14 @@ Median time per output token (1024→8192, decode-bound) and median time to firs
 
 Mean GPU package power over each cell's bench window only (engine load excluded), from `rocm-smi` sampled every ~5 s on every node of the job (`power_samples.csv` in each cell directory); cells with under 60% sample coverage are left blank. Efficiency is total tokens per joule of GPU energy. MI355X board limit: 1,400 W.
 
-| shape | point | 1 node EP8 N=512 | 1 node EP1 N=512 | TP8/PP2 EP8 N=1024 | TP2/PP8 EP2 N=256 |
-|---|---|---|---|---|---|
-| 8192→1024 | low | — | 430 W · 0.17 tok/J | — | 334 W · 0.07 tok/J |
-| 8192→1024 | mid | 943 W · 2.31 tok/J | 978 W · 2.33 tok/J | 636 W · 1.92 tok/J | 386 W · 0.90 tok/J |
-| 8192→1024 | high | 979 W · 2.51 tok/J | 1,007 W · 2.53 tok/J | — | — |
-| 1024→8192 | low | — | 421 W · 0.02 tok/J | — | 334 W · 0.01 tok/J |
-| 1024→8192 | mid | — | — | 602 W · 1.00 tok/J | 388 W · 0.29 tok/J |
-| 1024→8192 | high | — | — | 598 W · 1.28 tok/J | 392 W · 0.42 tok/J |
+| shape | point | 1 node v0.29 EP8 N=512 | 1 node v0.29 EP1 N=512 | 1 node v0.30 EP8 N=512 | 1 node v0.30 EP1 N=512 | 1 node v0.29 EP1 N=1024 | 1 node v0.29 cg1024 EP1 N=1024 | 1 node v0.30 EP1 N=1024 | 1 node v0.30 cg1024 EP1 N=1024 | TP8/PP2 EP8 N=1024 | TP2/PP8 EP2 N=256 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 8192→1024 | low | — | 430 W · 0.17 tok/J | 419 W · 0.17 tok/J | 421 W · 0.18 tok/J | — | — | — | — | — | 334 W · 0.07 tok/J |
+| 8192→1024 | mid | 943 W · 2.31 tok/J | 978 W · 2.33 tok/J | 943 W · 2.50 tok/J | 985 W · 2.53 tok/J | 1,003 W · 2.54 tok/J | — | 1,011 W · 2.75 tok/J | — | 636 W · 1.92 tok/J | 386 W · 0.90 tok/J |
+| 8192→1024 | high | 979 W · 2.51 tok/J | 1,007 W · 2.53 tok/J | 984 W · 2.69 tok/J | 1,013 W · 2.75 tok/J | 1,004 W · 2.63 tok/J | — | 1,006 W · 2.88 tok/J | — | — | — |
+| 1024→8192 | low | — | 421 W · 0.02 tok/J | 420 W · 0.02 tok/J | 423 W · 0.02 tok/J | — | 420 W · 0.02 tok/J | — | 420 W · 0.02 tok/J | — | 334 W · 0.01 tok/J |
+| 1024→8192 | mid | — | — | 917 W · 0.92 tok/J | 953 W · 0.93 tok/J | 948 W · 1.33 tok/J | 941 W · 1.33 tok/J | 925 W · 1.34 tok/J | 921 W · 1.34 tok/J | 602 W · 1.00 tok/J | 388 W · 0.29 tok/J |
+| 1024→8192 | high | — | — | 921 W · 1.31 tok/J | 921 W · 1.34 tok/J | 753 W · 1.53 tok/J | 946 W · 1.71 tok/J | 732 W · 1.52 tok/J | 851 W · 1.69 tok/J | 598 W · 1.28 tok/J | 392 W · 0.42 tok/J |
 
 ## External comparison: SemiAnalysis InferenceX
 
@@ -156,14 +206,14 @@ Source: `https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-V4
 
 Their `8192→1024` shape matches ours exactly. (Their other shape is 1024→1024; ours is 1024→8192, so those do not compare.) Each row compares at equal concurrency: our N=32 configs at their 16/32, our N=512 configs at their 256/512.
 
-| conc | our point | SemiAnalysis | ours EP8 | ours EP1 | best ours vs SA |
+| conc | our point | SemiAnalysis | ours v0.29 (best EP) | ours v0.30 (best EP) | best ours vs SA |
 |---|---|---|---|---|---|
-| 16 | mid (N=32) | 726.9 | 690.7 | 632.6 | **-5.0%** |
-| 32 | high (N=32) | 1,105.7 | 1,052.7 | 1,127.0 | **+1.9%** |
-| 256 | mid (N=512) | 2,192.8 | 2,177.9 | 2,278.6 | **+3.9%** |
-| 512 | high (N=512) | 2,514.8 | 2,457.4 | 2,544.0 | **+1.2%** |
+| 16 | mid (N=32) | 726.9 | 690.7 | 791.7 | **+8.9%** |
+| 32 | high (N=32) | 1,105.7 | 1,127.0 | 1,216.5 | **+10.0%** |
+| 256 | mid (N=512) | 2,192.8 | 2,278.6 | 2,487.0 | **+13.4%** |
+| 512 | high (N=512) | 2,514.8 | 2,544.0 | 2,781.8 | **+10.6%** |
 
-All tok/s/GPU. **The two independent implementations agree to within 5.0% at every shared concurrency**, from 16 to 512.
+All tok/s/GPU. On the same release family as theirs (v0.30.0 contains their nightly) we are **+8.9% to +13.4%** against them at every shared concurrency from 16 to 512; on v0.29.0, -5.0% to +3.9%. The two independent harnesses measure the same hardware consistently.
 
 How they reach concurrency 512 on one node: their serve command (`benchmarks/single_node/fixed_seq_len/deprecated/dsv4_fp4_mi355x_vllm.sh` in InferenceX) sets no `--max-num-seqs`, so vLLM's default for ≥160 GB GPUs, 1024, applies — they never take N from the startup capacity line. They also run a vLLM **nightly** (`vllm/vllm-openai-rocm:nightly-d9105ea8001e0a6d77a96327d17515bb5791fb36`, contained in v0.30.0) with flags our spec does not use or does not allow: no `--max-model-len` / `--max-num-batched-tokens` (fixed at 9216 here, §8.1), `--moe-backend aiter` with shared-expert fusion, `FULL_AND_PIECEWISE` CUDA graphs, `--async-scheduling`, and `VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=INT4` (an INT4-quantised all-reduce, additional activation quantisation under §8.5).
 

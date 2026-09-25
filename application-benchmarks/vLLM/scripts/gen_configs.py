@@ -15,13 +15,10 @@ Parallelism is per cluster because it depends on GPUs/node and GPU memory. DeepS
 (~1.6T) needs ~16 GPUs: on 4-GPU nodes (the Snellius H100 example) that is TP=4 within a node
 plus PP=4 across nodes (served via Ray); on 8-GPU nodes it is TP=8 on a single node.
 
-N (the max batch size, `max_num_seqs`) is declared per layout and is vendor-tunable. To find it,
-start the layout once and read vLLM's own startup line:
-
-    Maximum concurrency for 9216 tokens per request: X.XXx
-
-then use that value, or the nearest lower power of two. One N covers both shapes: they each sum
-to 9216 = --max-model-len, so peak KV per sequence is identical.
+N (the max batch size, `max_num_seqs`) is declared per layout and is vendor-tunable. Determine
+it by measurement (README §4, "Choosing N"): vLLM's startup "Maximum concurrency" line is not an
+accurate ceiling. One N covers both shapes: they each sum to 9216 = --max-model-len, so peak KV
+per sequence is identical.
 
 This script IS the canonical way to (re)author configs — edit MODELS / CLUSTERS / SHAPES /
 POINTS below and re-run. Output paths: configs/<cluster>/<model>/{serve,bench}-params.json
@@ -203,6 +200,115 @@ CLUSTERS = {
     "amd/mi355x-n32": {        # same node, N=32 @ GPU_MEM_UTIL=0.97 (see configs/.../system.sh)
         "deepseek-v4-pro": {
             "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 32}],
+        },
+    },
+    # Exploratory TP/PP layout sweep across BOTH nodes (16 GPUs, via Ray — see that cluster's
+    # system.sh). Not a submission candidate: the point is to compare parallelism strategies,
+    # not to push one layout's ceiling. Every layout uses the SAME max_num_seqs=16 as ../mi355x
+    # (its single-node TP8 baseline) so the sweep isolates the topology, not the batch size —
+    # raise N per layout later (see ../mi355x-n32/system.sh for the measurement method) if
+    # squeezing each layout's own ceiling is wanted instead.
+    "amd/mi355x-2node": {
+        "deepseek-v4-pro": {
+            # TP16/PP1 dropped: measured directly on this cluster to fail deterministically —
+            # DeepSeek-V4's shared_experts MLP, split TP16, produces a per-partition dim (192)
+            # not divisible by the FP8 quantization block_k (128) ("Weight input_size_per_partition
+            # = 192 is not divisible by weight quantization block_k = 128"). Not fixable by config;
+            # the checkpoint's FP8 block scheme is simply incompatible with TP=16 for this layer.
+            "parallels": [
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 16},
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 16,
+                 "enable-expert-parallel": False},
+                {"tensor-parallel-size": 4, "pipeline-parallel-size": 4, "max_num_seqs": 16},
+                {"tensor-parallel-size": 4, "pipeline-parallel-size": 4, "max_num_seqs": 16,
+                 "enable-expert-parallel": False},
+                {"tensor-parallel-size": 2, "pipeline-parallel-size": 8, "max_num_seqs": 16},
+                {"tensor-parallel-size": 2, "pipeline-parallel-size": 8, "max_num_seqs": 16,
+                 "enable-expert-parallel": False},
+            ],
+        },
+    },
+    # Full 2-node grid over the Pollara RDMA fabric (see that cluster's system.sh): every valid
+    # TP×PP layout of 16 GPUs × EP on/off × all points × both shapes. N here is each layout's
+    # startup "Maximum concurrency" line rounded down to a power of two — which understates what
+    # fits (README §4); superseded by the measured N of amd/mi355x-2node-rdma-n1024 below. Only
+    # the TP2/PP8 EP-on cells were run before the sweep was stopped.
+    "amd/mi355x-2node-rdma-sweep": {
+        "deepseek-v4-pro": {
+            "parallels": [
+                {"tensor-parallel-size": 2, "pipeline-parallel-size": 8, "max_num_seqs": 256},
+                {"tensor-parallel-size": 2, "pipeline-parallel-size": 8, "max_num_seqs": 256,
+                 "enable-expert-parallel": False},
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 64},
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 64,
+                 "enable-expert-parallel": False},
+                {"tensor-parallel-size": 4, "pipeline-parallel-size": 4, "max_num_seqs": 128},
+                {"tensor-parallel-size": 4, "pipeline-parallel-size": 4, "max_num_seqs": 128,
+                 "enable-expert-parallel": False},
+            ],
+        },
+    },
+    # N far above the startup "Maximum concurrency" line (32.6x on one node, 78.4x for
+    # TP8/PP2). For DeepSeek-V4 that line is a worst-case reservation summed over its many KV
+    # groups (compressed MLA, indexer, compressor state, sliding window); measured KV usage at
+    # runtime is ~60x lower (1.5% with 256 near-full-length requests on TP2/PP8, reported
+    # 293.7x). §9 ruling 7 permits declaring N above the reported capacity.
+    "amd/mi355x-1node-n512": {    # one node, same engine / GPU_MEM_UTIL=0.97 as mi355x-n32
+        "deepseek-v4-pro": {
+            "parallels": [
+                {"tensor-parallel-size": 8, "max_num_seqs": 512},
+                {"tensor-parallel-size": 8, "max_num_seqs": 512,
+                 "enable-expert-parallel": False},
+            ],
+        },
+    },
+    "amd/mi355x-1node-n512-v030": {    # mi355x-1node-n512 on v0.30.0 — engine the only change
+        "deepseek-v4-pro": {
+            "parallels": [
+                {"tensor-parallel-size": 8, "max_num_seqs": 512},
+                {"tensor-parallel-size": 8, "max_num_seqs": 512,
+                 "enable-expert-parallel": False},
+            ],
+        },
+    },
+    # N=1024 on one node, EP1 only (EP1 won every mid/high cell at N=512): 1024→8192 was still
+    # scaling at N=512 with ~21% KV-cache usage. One per engine.
+    "amd/mi355x-1node-n1024": {
+        "deepseek-v4-pro": {
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 1024,
+                           "enable-expert-parallel": False}],
+        },
+    },
+    "amd/mi355x-1node-n1024-v030": {
+        "deepseek-v4-pro": {
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 1024,
+                           "enable-expert-parallel": False}],
+        },
+    },
+    # mi355x-1node-n1024{,-v030} with CUDA graphs captured up to batch 1024 (vLLM's default cap
+    # is 512): at N=1024, 1024→8192 decode batches above 512 otherwise run without full graphs
+    # and the high point lost 8–10% against concurrency 512. §8.3 graph-capture tunable.
+    "amd/mi355x-1node-n1024-cg1024": {
+        "deepseek-v4-pro": {
+            "extra": {"_extra_serve_args": "-cc.max_cudagraph_capture_size=1024"},
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 1024,
+                           "enable-expert-parallel": False}],
+        },
+    },
+    "amd/mi355x-1node-n1024-v030-cg1024": {
+        "deepseek-v4-pro": {
+            "extra": {"_extra_serve_args": "-cc.max_cudagraph_capture_size=1024"},
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 1024,
+                           "enable-expert-parallel": False}],
+        },
+    },
+    "amd/mi355x-2node-rdma-n1024": {    # both nodes over RDMA, as mi355x-2node-rdma-sweep
+        "deepseek-v4-pro": {
+            "parallels": [
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024},
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024,
+                 "enable-expert-parallel": False},
+            ],
         },
     },
     # Identical to mi355x-n32 except for the CHECKPOINT: amd/DeepSeek-V4-Pro-MXFP4 declares
