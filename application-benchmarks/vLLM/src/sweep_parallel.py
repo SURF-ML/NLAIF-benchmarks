@@ -30,6 +30,10 @@ Usage
         --sbatch-args "-p gpu_h100 --account=myaccount"
 """
 
+# Runs on the host python, whichever that is per cluster (ORCH_PYTHON in system.sh). Lazy
+# annotations keep `str | None`-style hints parseable down to Python 3.7.
+from __future__ import annotations
+
 import argparse
 import json
 import os

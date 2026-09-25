@@ -12,6 +12,9 @@ SBATCH_ARGS="${SBATCH_ARGS:--p gpu_h100}"
 # in run.sh, which is a GPU partition, so set a CPU partition here. Only `./run.sh <cluster>`
 # uses this; `--local` runs the orchestrator in your shell instead.
 ORCH_SBATCH_ARGS="${ORCH_SBATCH_ARGS:--p rome}"
+# Host python for the orchestrator (it runs outside the container, since it needs sbatch).
+# The default `python3` on Snellius is 3.9; use the system 3.11 instead.
+ORCH_PYTHON="${ORCH_PYTHON:-/usr/bin/python3.11}"
 # How workers request GPUs per node. '{n}' is the per-node GPU count. The default
 # '--gpus-per-node={n}' works here; clusters whose GRES is configured differently can override,
 # e.g. GPU_REQUEST_TMPL='--gres=gpu:{n}' or '--gres=gpu:<type>:{n}'.
