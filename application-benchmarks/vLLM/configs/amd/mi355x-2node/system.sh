@@ -93,10 +93,11 @@ POLLARA_HCA="${POLLARA_HCA:-rocep9s0,rocep25s0,rocep105s0,rocep121s0,rocep137s0,
 #   mkdir -p $AITER_CACHE
 #   podman cp seed:/usr/local/lib/python3.12/dist-packages/aiter/jit/flydsl_cache/. \
 #             $AITER_CACHE/ && podman rm seed
-# This layout was measured on the v0.29.0 image.
-CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/vllm-bench:amd-v0.29.0}"
-AITER_CACHE="${AITER_CACHE:-$HOME/.cache/aiter/flydsl_cache}"
-TRITON_CACHE="${TRITON_CACHE:-$HOME/.cache/triton}"
+# vLLM v0.30.0, the same engine as the single-node config (../mi355x). The AITER and Triton
+# caches are per vLLM version, so they are the -v030 ones, as in ../mi355x.
+CONTAINER_IMAGE="${CONTAINER_IMAGE:-localhost/vllm-bench:amd-v0.30.0}"
+AITER_CACHE="${AITER_CACHE:-$HOME/.cache/aiter-v030/flydsl_cache}"
+TRITON_CACHE="${TRITON_CACHE:-$HOME/.cache/triton-v030}"
 AITER_JIT_DIR=/usr/local/lib/python3.12/dist-packages/aiter/jit
 
 CONTAINER_RUN_ARGS="${CONTAINER_RUN_ARGS:---device /dev/kfd --device /dev/dri \
