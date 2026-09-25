@@ -11,8 +11,8 @@ BUILDER="${BUILDER:-apptainer}"
 # GPU_VENDOR: nvidia | amd (default: nvidia)
 GPU_VENDOR="${GPU_VENDOR:-nvidia}"
 
-# VLLM_VERSION: upstream vllm/vllm-openai image tag (default: v0.23.0)
-VLLM_VERSION="${VLLM_VERSION:-v0.29.0}"
+# VLLM_VERSION: upstream vllm/vllm-openai image tag (default: v0.30.0)
+VLLM_VERSION="${VLLM_VERSION:-v0.30.0}"
 
 NVIDIA_BASE="vllm/vllm-openai:${VLLM_VERSION}"
 AMD_BASE="vllm/vllm-openai-rocm:${VLLM_VERSION}"
