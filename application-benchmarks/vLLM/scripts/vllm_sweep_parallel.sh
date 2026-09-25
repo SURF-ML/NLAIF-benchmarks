@@ -60,7 +60,9 @@ mkdir -p logs
 RESULTS_DIR="${RESULTS_DIR:-results/$(date +%Y%m%d_%H%M%S)}"
 
 # Orchestrator runs on the host python (needs sbatch/squeue/sacct), NOT in the container.
-/usr/bin/python3.11 "$REPO_ROOT/src/sweep_parallel.py" \
+# The interpreter differs per cluster, so system.sh may set ORCH_PYTHON; plain `python3` is the
+# default. sweep_parallel.py parses on Python 3.7+.
+${ORCH_PYTHON:-python3} "$REPO_ROOT/src/sweep_parallel.py" \
     --config-root="$CONFIG_ROOT" \
     --serve-cmd="$SERVE_CMD" \
     --bench-cmd="$BENCH_CMD" \

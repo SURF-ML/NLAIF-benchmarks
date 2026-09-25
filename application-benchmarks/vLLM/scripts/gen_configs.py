@@ -15,13 +15,10 @@ Parallelism is per cluster because it depends on GPUs/node and GPU memory. DeepS
 (~1.6T) needs ~16 GPUs: on 4-GPU nodes (the Snellius H100 example) that is TP=4 within a node
 plus PP=4 across nodes (served via Ray); on 8-GPU nodes it is TP=8 on a single node.
 
-N (the max batch size, `max_num_seqs`) is declared per layout and is vendor-tunable. To find it,
-start the layout once and read vLLM's own startup line:
-
-    Maximum concurrency for 9216 tokens per request: X.XXx
-
-then use that value, or the nearest lower power of two. One N covers both shapes: they each sum
-to 9216 = --max-model-len, so peak KV per sequence is identical.
+N (the max batch size, `max_num_seqs`) is declared per layout and is vendor-tunable. Determine
+it by measurement (README §4, "Choosing N"): vLLM's startup "Maximum concurrency" line is not an
+accurate ceiling. One N covers both shapes: they each sum to 9216 = --max-model-len, so peak KV
+per sequence is identical.
 
 This script IS the canonical way to (re)author configs — edit MODELS / CLUSTERS / SHAPES /
 POINTS below and re-run. Output paths: configs/<cluster>/<model>/{serve,bench}-params.json
@@ -177,6 +174,34 @@ CLUSTERS = {
             # crashes on this TP4×PP4 layout — full torch.compile (mode=3) with a decode-only
             # CUDA-graph capture is required here. Per-platform tunable, so it lives per-cluster.
             "extra": {"_extra_serve_args": "-cc.mode=3 -cc.cudagraph_mode=FULL_DECODE_ONLY"},
+        },
+    },
+    # AMD MI355X, one node: 8 x 288 GiB holds the ~806 GiB checkpoint outright, so this is TP8
+    # with no PP, no Ray and no second node. N=1024 sits far above the startup "Maximum
+    # concurrency" line (32.6x at GPU_MEM_UTIL=0.97): for DeepSeek-V4 that line is a worst-case
+    # reservation summed over its many KV groups, and measured KV usage stayed around 21% at
+    # N=512 while 1024->8192 was still scaling. EP off (EP1) won every mid/high cell at N=512.
+    # CUDA graphs are captured up to batch 1024 (vLLM's default cap is 512): without that,
+    # decode batches above 512 run without full graphs and the high point lost 8-10%.
+    "amd/mi355x": {            # 8 x 288GiB MI355X per node
+        "deepseek-v4-pro": {
+            "extra": {"_extra_serve_args": "-cc.max_cudagraph_capture_size=1024"},
+            "parallels": [{"tensor-parallel-size": 8, "max_num_seqs": 1024,
+                           "enable-expert-parallel": False}],
+        },
+    },
+    # AMD MI355X, two nodes (16 GPUs) as one deployment: TP8 within each node, PP2 across them,
+    # via Ray, with RCCL over the per-GPU Pollara RDMA NICs (see that cluster's system.sh). EP on
+    # and off are both submitted as layouts; score.py pools their cells.
+    # TP16/PP1 is not possible: DeepSeek-V4's shared_experts MLP, split TP16, gives a
+    # per-partition dim (192) not divisible by the FP8 quantization block_k (128).
+    "amd/mi355x-2node": {
+        "deepseek-v4-pro": {
+            "parallels": [
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024},
+                {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024,
+                 "enable-expert-parallel": False},
+            ],
         },
     },
 }

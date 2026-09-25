@@ -30,6 +30,10 @@ Usage
         --sbatch-args "-p gpu_h100 --account=myaccount"
 """
 
+# Runs on the host python, whichever that is per cluster (ORCH_PYTHON in system.sh). Lazy
+# annotations keep `str | None`-style hints parseable down to Python 3.7.
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -111,10 +115,38 @@ def apply_params_to_cmd(cmd: str, params: dict) -> str:
     return (cmd.strip() + " " + " ".join(extra)).strip()
 
 
-def wait_for_server(port: int, timeout: int = 600):
+_SERVE_STALL_S = 1200
+
+
+def wait_for_server(port: int, timeout: int = 600, server: "subprocess.Popen | None" = None,
+                    log: "pathlib.Path | None" = None):
+    """Poll /health until it responds, the server process exits, or `timeout` elapses.
+
+    Without the `server` check this blocks for the FULL timeout (up to 5400s for a
+    multi-node DeepSeek-V4 config) even when the engine already crashed on startup and
+    the process is long gone — measured directly on this cluster. Checking server.poll()
+    lets a startup crash fail in seconds instead of holding the allocation for ~90 minutes.
+    """
     url = f"http://localhost:{port}/health"
     deadline = time.time() + timeout
+    # A startup that stops logging entirely is wedged, not slow: a healthy DeepSeek-V4 load
+    # logs continuously (shard progress, kernel imports, and a 60 s shm_broadcast heartbeat
+    # while ranks wait). Measured here: an engine silent after "Connected to Ray cluster" for
+    # 45+ min never recovered, and would otherwise hold both nodes for the full timeout.
+    last_size, last_growth = -1, time.time()
     while time.time() < deadline:
+        if server is not None and server.poll() is not None:
+            raise RuntimeError(
+                f"Server on port {port} exited (code {server.returncode}) before becoming ready"
+            )
+        if log is not None:
+            size = log.stat().st_size if log.exists() else 0
+            if size != last_size:
+                last_size, last_growth = size, time.time()
+            elif time.time() - last_growth > _SERVE_STALL_S:
+                raise RuntimeError(
+                    f"Server on port {port} stalled: {log.name} unchanged for {_SERVE_STALL_S}s"
+                )
         try:
             urllib.request.urlopen(url, timeout=2)
             return
@@ -161,13 +193,17 @@ def combo_subdir(serve: dict, bench: dict) -> str:
 class RayCtx:
     """Handles for a Ray cluster started across the worker's sbatch allocation."""
 
-    def __init__(self, head_proc, worker_proc, gcs_address, container, env, nodes):
+    def __init__(self, head_proc, worker_proc, gcs_address, container, env, nodes,
+                 head_container=None, container_engine=None, worker_container=None):
         self.head_proc = head_proc
         self.worker_proc = worker_proc      # may be None when only the head node exists
         self.gcs_address = gcs_address
         self.container = container          # container-exec prefix as a list (may be [])
         self.env = env
         self.nodes = nodes
+        self.head_container = head_container    # head's own container name, podman/docker only
+        self.container_engine = container_engine  # "podman"/"docker", or None (e.g. apptainer)
+        self.worker_container = worker_container  # worker nodes' container name, podman/docker only
 
 
 def _slurm_nodes() -> list[str]:
@@ -208,6 +244,17 @@ def start_ray_cluster(args, ray_port: int, gpus_per_node: int) -> "RayCtx":
     container = shlex.split(args.container_exec) if args.container_exec else []
     env = os.environ | {"RAY_ADDRESS": gcs_address}
 
+    # podman/docker isolate each container's /tmp, hostname, etc., which breaks Ray's
+    # same-node driver attachment for a later *separate* container running vllm serve (see
+    # run_worker) — apptainer shares the host's namespaces by default and never hits this,
+    # so it keeps the original fresh-invocation behavior untouched (engine stays None).
+    container_engine = container[0] if container and container[0] in ("podman", "docker") else None
+    run_id = os.environ.get('SLURM_JOB_ID', os.getpid())
+    head_container = f"ray-head-{run_id}" if container_engine else None
+    worker_container = f"ray-worker-{run_id}" if container_engine else None
+    name_flag = ["--name", head_container] if head_container else []
+    worker_name_flag = ["--name", worker_container] if worker_container else []
+
     print(f"[worker] Ray: {len(nodes)} node(s), head={head_node}({head_ip}) "
           f"gcs={gcs_address} gpus/node={gpus_per_node}", flush=True)
 
@@ -216,7 +263,7 @@ def start_ray_cluster(args, ray_port: int, gpus_per_node: int) -> "RayCtx":
     head_cmd = [
         "srun", "--nodes=1", "--ntasks=1", f"--nodelist={head_node}",
         "--overlap", "--export=ALL",
-        *container,
+        *container[:-1], *name_flag, *container[-1:],
         "ray", "start", "--head", "--disable-usage-stats",
         f"--node-ip-address={head_ip}", f"--port={ray_port}",
         f"--num-gpus={gpus_per_node}", "--block",
@@ -230,13 +277,14 @@ def start_ray_cluster(args, ray_port: int, gpus_per_node: int) -> "RayCtx":
         worker_cmd = [
             "srun", f"--nodes={len(worker_nodes)}", "--ntasks-per-node=1",
             f"--nodelist={','.join(worker_nodes)}", "--overlap", "--export=ALL",
-            *container,
+            *container[:-1], *worker_name_flag, *container[-1:],
             "ray", "start", "--address", gcs_address,
             f"--num-gpus={gpus_per_node}", "--block",
         ]
         worker_proc = subprocess.Popen(worker_cmd, start_new_session=True, env=env)
 
-    ctx = RayCtx(head_proc, worker_proc, gcs_address, container, env, nodes)
+    ctx = RayCtx(head_proc, worker_proc, gcs_address, container, env, nodes,
+                 head_container, container_engine, worker_container)
 
     # Wait until every node's GPUs have registered (GPU count is a stricter
     # readiness signal than node count — nodes appear before their GPUs do).
@@ -260,11 +308,33 @@ def start_ray_cluster(args, ray_port: int, gpus_per_node: int) -> "RayCtx":
 
 def stop_ray_cluster(ctx: "RayCtx") -> None:
     """Graceful `ray stop` broadcast, then hard-kill the held --block srun steps."""
+    if ctx.container_engine:
+        # podman/docker: `ray stop` in a fresh container sees no Ray processes, and killing the
+        # srun client below doesn't reach a rootless container either (it lives in the user's
+        # systemd slice, not the job's cgroup) — measured directly on this cluster: every job
+        # leaked its Ray containers, and a leftover raylet on the shared host network wedged
+        # the next job's engine right after "Connected to Ray cluster". Remove them by name.
+        # `rm -f` can give up ("given PID did not die within timeout") while the GPU driver is
+        # still releasing the engine's ~260 GiB/GPU — measured here at ~3 min. Retry until the
+        # containers are really gone, so this job holds the nodes until their GPUs are free and
+        # the next job's startup memory check doesn't see them still allocated.
+        present = [n for n in (ctx.head_container, ctx.worker_container) if n]
+        names = " ".join(present)
+        filters = " ".join(f"--filter name=^{n}$" for n in present)
+        eng = ctx.container_engine
+        # One `rm` per name: each node has only one of these containers, and `podman rm -f
+        # missing present` silently removes nothing (exit 0) — measured here, it left every
+        # worker-node container running.
+        stop_cmd = ["sh", "-c",
+                    f"for i in $(seq 60); do for n in {names}; do {eng} rm -f $n >/dev/null 2>&1; done; "
+                    f"[ -z \"$({eng} ps -aq {filters})\" ] && exit 0; sleep 10; done; exit 0"]
+    else:
+        stop_cmd = [*ctx.container, "ray", "stop", "--force"]
     try:
         subprocess.run(
             ["srun", f"--nodes={len(ctx.nodes)}", "--ntasks-per-node=1",
-             "--overlap", "--export=ALL", *ctx.container, "ray", "stop", "--force"],
-            env=ctx.env, timeout=60,
+             "--overlap", "--export=ALL", *stop_cmd],
+            env=ctx.env, timeout=720,
         )
     except Exception:
         pass
@@ -376,8 +446,7 @@ def run_worker(args):
     # In that case the worker runs on the host (for srun/scontrol), so the vllm commands
     # must be wrapped in the container. Single-node workers already run inside it, so the
     # prefix is empty and the commands run directly as before.
-    cmd_prefix = (shlex.split(args.container_exec)
-                  if args.ray and args.container_exec else [])
+    cmd_prefix: list[str] = []
     ray_ctx = None
     serve_env = os.environ | {"VLLM_SERVER_DEV_MODE": "1"}
     serve_cmd_str = apply_params_to_cmd(args.serve_cmd, serve_config) + f" --port {port}"
@@ -391,6 +460,19 @@ def run_worker(args):
         ray_ctx = start_ray_cluster(args, port + 1000, args.ray_gpus_per_node)
         serve_cmd_str += " --distributed-executor-backend ray"
         serve_env = serve_env | {"RAY_ADDRESS": ray_ctx.gcs_address}
+        if ray_ctx.head_container:
+            # podman/docker: a fresh, separate container can't join this Ray cluster even
+            # with --network=host — Ray's driver-side "is there a raylet on my node" check
+            # keys off node-local state (under /tmp/ray) that a second container never sees,
+            # so it looks like a different, raylet-less node and refuses to attach ("No node
+            # info found matching attributes"). `podman exec` into the head's own
+            # already-running container sidesteps this: it already has every mount/env var
+            # from CONTAINER_RUN_ARGS baked in from when it was created, so only the
+            # (dynamically-known-only-now) RAY_ADDRESS needs adding here.
+            cmd_prefix = [ray_ctx.container_engine, "exec",
+                          "-e", f"RAY_ADDRESS={ray_ctx.gcs_address}", ray_ctx.head_container]
+        elif args.container_exec:
+            cmd_prefix = shlex.split(args.container_exec)  # apptainer: original behavior
 
     # Capture the engine's own stdout/stderr next to the results instead of letting it
     # inherit into the SLURM log. serve.log holds vLLM's startup report, including
@@ -416,7 +498,7 @@ def run_worker(args):
 
     server_died = False
     try:
-        wait_for_server(port, args.serve_timeout)
+        wait_for_server(port, args.serve_timeout, server=server, log=serve_log)
         print(f"[worker port={port}] Server ready", flush=True)
 
         for bench_config in bench_configs:
@@ -428,7 +510,9 @@ def run_worker(args):
                       f"before bench — aborting remaining shapes", flush=True)
                 server_died = True
                 break
-            with tempfile.TemporaryDirectory() as tmp:
+            # Created under results_dir (not the default /tmp) so it's reachable from inside a
+            # multi-node podman-exec bench invocation too — see bench_prefix below.
+            with tempfile.TemporaryDirectory(dir=str(results_dir)) as tmp:
                 bench_cmd_str = (
                     apply_params_to_cmd(args.bench_cmd, bench_config)
                     + f" --host localhost --port {port}"
@@ -439,8 +523,20 @@ def run_worker(args):
                 # a single bench failure is isolated so the remaining shapes still run, but if the
                 # serve engine dies/wedges we abort the whole worker so SLURM frees the nodes
                 # instead of the bench blocking on never-returning requests until walltime.
+                #
+                # `cwd=tmp` below only sets the *host* podman-client process's directory — podman
+                # exec does not inherit it for the process it starts inside the container, which
+                # instead defaults to the container's own configured workdir ($REPO_ROOT). Without
+                # an explicit --workdir here, --save-result silently writes there instead of `tmp`,
+                # and this measurement's result is never found (measured directly on this cluster:
+                # the bench completed successfully — 16/16 requests — but its JSON was never seen).
+                # `tmp` lives under results_dir, itself under REPO_ROOT, so the same path resolves
+                # identically inside the container (bind-mounted) and outside it.
+                bench_prefix = cmd_prefix
+                if ray_ctx is not None and ray_ctx.head_container:
+                    bench_prefix = [cmd_prefix[0], cmd_prefix[1], "--workdir", tmp, *cmd_prefix[2:]]
                 outcome = _run_bench_monitored(
-                    [*cmd_prefix, *shlex.split(bench_cmd_str)], tmp, server, port)
+                    [*bench_prefix, *shlex.split(bench_cmd_str)], tmp, server, port)
                 if outcome == "server_dead" or (outcome == "failed" and not _is_healthy(port)):
                     print(f"[worker port={port}] ERROR: server died/wedged during bench — "
                           f"aborting remaining shapes", flush=True)
@@ -738,6 +834,7 @@ def run_orchestrator(args):
 
     print(f"[orchestrator] Waiting for {len(job_ids)} jobs ...", flush=True)
     poll_failures = 0
+    absent_counts: dict[int, int] = {}
     while True:
         active_ids = [jid for i, jid in job_ids.items()
                       if status[i]["state"] not in ("done", "FAILED", "cancelled")]
@@ -761,17 +858,34 @@ def run_orchestrator(args):
                     if jid in sq:
                         slurm_state, nodes = sq[jid]
                         status[i]["nodes"] = nodes
+                        absent_counts[i] = 0
                         if slurm_state in ("RUNNING", "COMPLETING"):
                             status[i]["state"] = "running"
                         # else stays "pending" (PENDING, CONFIGURING, etc.)
                     else:
                         # Job left squeue — resolve its final state. Only a terminal
                         # sacct state is conclusive: PENDING/RUNNING/UNKNOWN mean sacct
-                        # is lagging squeue, so leave it and re-check next cycle.
+                        # is lagging squeue, so leave it and re-check next cycle — UNLESS
+                        # sacct is unable to resolve ANY job here (accounting storage
+                        # disabled is a real cluster config, not a transient lag — measured
+                        # directly on this cluster: without this fallback the orchestrator
+                        # polls forever, never reaching plot/score, for jobs that had
+                        # already finished hours earlier). After a few consecutive cycles
+                        # absent from squeue with no sacct answer, fall back to the result
+                        # file the worker itself would have written — ground truth that
+                        # doesn't depend on accounting at all.
                         final = _get_final_state(jid)
                         if final in _TERMINAL_STATES:
                             status[i]["state"] = "done" if final == "COMPLETED" else "FAILED"
                             status[i]["nodes"] = ""
+                        else:
+                            absent_counts[i] = absent_counts.get(i, 0) + 1
+                            if absent_counts[i] >= 3:
+                                serve_config, bench_configs = groups[i]
+                                subdir = results_dir / combo_subdir(serve_config, bench_configs[0])
+                                status[i]["state"] = ("done" if (subdir / "summary.json").exists()
+                                                       else "FAILED")
+                                status[i]["nodes"] = ""
 
         parts = []
         for i in sorted(status):
