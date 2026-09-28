@@ -70,9 +70,10 @@ waits on. At a fixed workload shape and concurrency the two are proportional, so
 would count the same measurement twice; and at the highest operating point, scoring tok/s/user
 would reward a *smaller* KV cache, since it divides by the concurrency the hardware can sustain.
 
-Each run produces one measurement for a given `(workload shape, parallelism layout, operating
-point)`. A **cell** is one `(workload shape, operating point)` pair: each cell takes the best
-measurement across layouts, and every cell is scored independently ([§7](#7-scoring)).
+Each measurement is taken for a given `(workload shape, parallelism layout, operating point)`, with
+one engine start per layout covering all of its points ([§5.5](#55-launching-a-sweep)). A **cell**
+is one `(workload shape, operating point)` pair: each cell takes the best measurement across
+layouts, and every cell is scored independently ([§7](#7-scoring)).
 
 ---
 

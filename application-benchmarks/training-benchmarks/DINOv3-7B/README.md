@@ -120,9 +120,9 @@ Snellius has two GPU partitions; 72 4-way 40GB A100 nodes and 88 4-way H100 94 G
 - **Runtime**: ~34 hours (25k iterations) to reach produce checkpoint that reaches quality target
 
 ### H100 Partition Score
-- **H100 partition size**: 88 nodes × 4 GPUs = 384 GPUs
-- **Weak scaling factor**: 384 / 32 = 12
-- **System throughput**: 12 / 34 hours = **0.35 runs per hour**
+- **H100 partition size**: 88 nodes × 4 GPUs = 352 GPUs
+- **Weak scaling factor**: 352 / 32 = 11
+- **System throughput**: 11 / 34 hours = **0.32 runs per hour**
 
 
 

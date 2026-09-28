@@ -9,7 +9,13 @@ This pre-training benchmark targets single (or two) node (8 GPUs), small input d
 This benchmark follows all the CLOSED division rulesets from the [MLPerf training rules](https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc), as well as some additional rules of our own. In short, this means that the framework and exact implementation of the training script is flexible, as long as the result is mathematically equivalent to the reference implementation beyond the allowed tunable hyperparameters (such as batch size and learning rate). 
 
 
-On top of these rules, we restrict the precision format to be 8-bit precision (e.g., FP8/MXFP8) or higher and that the run is performed on 8 GPUs/accelerators. For more details on these rules, as well as the scoring mechanism we refer to [`RULES_AND_SCORING.md`](RULES_AND_SCORING.md).
+Some modifications on top of the MLPerf rules are made for this benchmark. Specifically:
+- Precision format is restricted to be **at least** 8-bit precision (e.g., FP8/MXFP8). Higher precisions (e.g., BF16/FP16, TF32, FP32, FP64) are still permitted according to the MLPerf rules. 
+- The final score is derived as the *mean* of 10 **consecutive** runs, without discarding the best and worst performing run.
+- Each run is performed using 8 GPUs/accelerators
+- Each run must be on a different subset of nodes on the accelerated partition
+
+For more details on these rules, as well as the scoring mechanism we refer to [`RULES_AND_SCORING.md`](RULES_AND_SCORING.md).
 
 Below is the original README, supplemented with descriptions of our additions/changes to the reference implementation.
 

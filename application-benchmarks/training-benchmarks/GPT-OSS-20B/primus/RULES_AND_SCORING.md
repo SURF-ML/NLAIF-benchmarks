@@ -19,7 +19,7 @@ On top of the MLPerf rules, the following additional restrictions apply:
 | Constraint | Requirement |
 |------------|-------------|
 | **GPUs per Run** | Exactly 8 GPUs/accelerators |
-| **Precision** | 8-bit precision (e.g., FP8, MXFP8) or higher (BF16/FP16, FP32). Lower precisions are **not** allowed. |
+| **Precision** | 8-bit precision (e.g., FP8, MXFP8) or higher (BF16/FP16, FP32, TF32). Lower than 8-bit precisions are **not** allowed. |
 | **Software Version** | The latest stable version of the software available at the time of release of the benchmark suite shall be used, but bugfix releases released after this date may also be used |
 
 ### 2.3 Quality Target
@@ -42,12 +42,19 @@ For each run:
 - Follow MLPerf submission guidelines
 
 ## 4. Scoring
-The single-run score for an eligible partition is determined using MLPerf's methodology: 
-- Perform 10 runs to the loss target
-- Discard slowest and fastest run
-- Compute average runtime in minutes over 8 remaining runs
+### 4.1 Single run
+The single-run score for the accelerated partition is determined using MLPerf's methodology: 
+- Perform a run
+- Take runtime of remaining run
 
-Using the resulting average runtime and the size of the job (8 GPUs), the score is then weak scaled to the entire partition, system and eventually lifetime of the system as described in the requirements document. 
+The exact method of measuring the runtime of a single run is detailed in the [MLPerf Training Rules](https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc). Paraphrasing it here (but refer to the MLPerf rules for the full description): the clock starts either before any part of the system touches the dataset, or once the maximum model initialization time is exceed (30 minutes), whichever comes first. The clock stops when the system detects that it has reached the target (3.34 validation loss).
+
+
+### 4.2 System score
+
+As per the MLPerf rules a total of ***10*** runs are required to provide a final score. However, this benchmark adds the constraint that these are 10 **consecutive** runs, and the final reported runtime is the ***mean*** runtime of these 10 runs (without discarding the slowest and fastest run). Furthermore, each of the 10 runs needs to be on a different node (or subset of nodes for 4-way systems)
+
+The mean score is then weak scaled to the lifetime of the entire system as described in the requirements document.
 
 
 ## 5. Reference Implementation
@@ -82,7 +89,7 @@ Per MLPerf CLOSED rules:
 | **GPUs per Run** | 8 |
 | **Precision** | 8-bit (FP8) or higher |
 | **Quality Target** | ≤3.34 validation loss |
-| **Required Runs** | 10 |
+| **Required Runs** | 10 consecutive, each run on a different node (or subset of nodes) |
 | **Framework** | Any |
-| **Scoring** | Weak-scaled runs/minute based on geometric mean of middle 8 out of 10 runs|
+| **Scoring** | Mean average runtime of 10 consecutive runs|
 | **Rules** | [MLPerf Training Rules](https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc) + additional constraints |
