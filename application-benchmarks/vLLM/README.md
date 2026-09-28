@@ -2,8 +2,7 @@
 
 This document is the authoritative specification for the benchmark. It defines what is
 measured, how to reproduce a result, which parameters are fixed, and how submissions are
-scored. **Where this document is silent, the configuration is prohibited by default**; contact
-the organisers before deviating from any stated requirement.
+scored. **Where this document is silent, the configuration is prohibited by default**; contact EuroHPC before deviating from any stated requirement.
 
 ---
 
