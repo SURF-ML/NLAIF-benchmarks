@@ -83,20 +83,68 @@ One model is evaluated:
 
 | Model | Checkpoint | Precision | Architecture |
 |-------|------------|-----------|--------------|
-| **DeepSeek V4 Pro** | `deepseek-ai/DeepSeek-V4-Pro` | FP4+FP8 mixed (native) | MoE, 1.6T total / 49B active |
+| **DeepSeek V4 Pro** | `deepseek-ai/DeepSeek-V4-Pro`, or a permitted FP4 expert checkpoint (below) | FP4+FP8 mixed (native) | MoE, 1.6T total / 49B active |
 
-**Precision is fixed and may not be substituted.** The score contains no accuracy term, so a free
-choice of precision would reward throughput gained by degrading output quality — gaming the metric
-cannot detect.
+**Precision is fixed, with one exception.** The score contains no accuracy term, so a free choice
+of precision would reward throughput gained by degrading output quality — gaming the metric cannot
+detect. Every tensor therefore runs at the base checkpoint's precision, except the expert layers,
+which may be FP4 in a permitted FP4 expert checkpoint.
 
-DeepSeek V4 Pro is trained with MoE expert weights in FP4 and attention/router/normalisation
-weights in FP8. FP4 encodings differ across vendors (block-16 with FP8 scales vs block-32 with
-power-of-two scales), so a byte-identical checkpoint is not possible — each platform runs its own
-native FP4 build of the base weights.
+### Base checkpoint precision
 
-### DeepSeek V4 Pro layout and FP4 accuracy gate
+DeepSeek V4 Pro ships with mixed precision. From the checkpoint's tensor headers:
 
-Every platform loads the base `deepseek-ai/DeepSeek-V4-Pro` checkpoint and uses tensor-,
+| Tensors | Base checkpoint | In a permitted FP4 expert checkpoint |
+|---------|-----------------|--------------------------------------|
+| Routed experts `ffn.experts.*` | MXFP4 (block 32, `F8_E8M0` scale) | MXFP4 or NVFP4; FP4 activations permitted |
+| Shared experts `ffn.shared_experts.*` | FP8 `F8_E4M3` + `F8_E8M0` scale | MXFP4 or NVFP4; FP4 activations permitted |
+| Attention projections `attn.{wq_a, wq_b, wkv, wo_a, wo_b}`, `attn.indexer.wq_b` | FP8 `F8_E4M3` + `F8_E8M0` scale | unchanged |
+| Compressors `attn.compressor.*`, `attn.indexer.compressor.*`, `attn.indexer.weights_proj` | BF16 | unchanged |
+| Router `ffn.gate`, embedding, head, all norms | BF16 | unchanged |
+
+### FP4 expert checkpoints
+
+A submission may use a quantised build of the base model instead of the base checkpoint, provided
+all of the following hold:
+
+1. **Official and public.** It is published on Hugging Face by the model developer or by an
+   accelerator vendor's official organisation (e.g. `nvidia/`, `amd/`), is publicly available at
+   acceptance, and is derived from `deepseek-ai/DeepSeek-V4-Pro`.
+2. **Only the experts differ.** Only routed-expert (`ffn.experts.*`) and shared-expert
+   (`ffn.shared_experts.*`) tensors may differ from the base checkpoint. Every other tensor —
+   attention, indexer, compressors, router, norms, embedding, head, MTP layers — is byte-identical
+   to the base, with its original dtype and scales. The tokenizer is identical too, since the
+   datasets' token counts depend on it ([§4](#4-workloads--datasets)).
+3. **FP4 weights, quantised directly.** Expert weights are **MXFP4** (block 32, E8M0 scale) or
+   **NVFP4** (block 16, FP8-E4M3 scale plus a per-tensor FP32 scale); the base MXFP4 weights may be
+   requantised to NVFP4. Weights are quantised directly from the base checkpoint's weights, per
+   block. Training, fine-tuning, distillation, error-compensating quantisation (GPTQ/AWQ-style),
+   pruning, and merging or dropping experts are prohibited.
+4. **FP4 activations, experts only.** The inputs to the expert GEMMs may be quantised to the same
+   FP4 format as the weights. Block scales are computed at run time; NVFP4's per-tensor global scale
+   may be static. Any calibration data must not come from the benchmark datasets. Nothing outside
+   the experts runs below the base checkpoint's precision, and the KV cache stays as fixed in
+   [§8.1](#81-fixed-parameters).
+5. **Runs in an allowed image.** It loads and runs in an official vLLM image at a stable release
+   ([§5.1](#51-system-requirements)), with no additional packages ([§8.5](#85-prohibited)).
+   Whether a given release already executes the FP4 format natively on a given platform is a
+   software matter: the checkpoint is permitted either way, and the measured throughput reflects it.
+6. **Disclosed.** The submission names the checkpoint (repository and revision) and its FP4 format
+   ([§6](#6-submitting-results)).
+
+Published builds that fit this rule, by a check of their tensor headers: `nvidia/DeepSeek-V4-Pro-NVFP4`
+and `amd/DeepSeek-V4-Pro-NVFP4` (routed experts NVFP4, shared experts FP8 as in the base), and
+`amd/DeepSeek-V4-Pro-MXFP4` (routed and shared experts MXFP4).
+
+To use one, set `"model"` for that cluster in `CLUSTERS` in
+[`scripts/gen_configs.py`](scripts/gen_configs.py) and regenerate. Its cells score as
+`deepseek-ai/DeepSeek-V4-Pro`, so they are compared with base-checkpoint results, and `scores.csv`
+records the checkpoint that produced each cell.
+
+### DeepSeek V4 Pro layout
+
+Every platform loads the base `deepseek-ai/DeepSeek-V4-Pro` checkpoint (or a permitted FP4 expert
+checkpoint) and uses tensor-,
 pipeline-, and expert-parallelism ([§8.4](#84-parallelism)), sized to the model's
 ~1.6T-parameter footprint (≈16 GPUs). Lay it out to match the node's GPU count and memory: a
 single node where enough high-bandwidth GPUs are available, or across nodes (the Snellius
@@ -226,6 +274,8 @@ Output: `containers/vllm-bench_<vendor>_<version>.sif` (or `.tar` for Podman). P
 export HF_HOME=/path/to/shared/model-cache   # must be readable on every compute node
 
 huggingface-cli download deepseek-ai/DeepSeek-V4-Pro
+# or a permitted FP4 expert checkpoint (§3), e.g.:
+huggingface-cli download nvidia/DeepSeek-V4-Pro-NVFP4
 ```
 
 ### 5.4 Platform configuration
@@ -336,8 +386,11 @@ self-describing: one row per cell with
 
 ```
 model, input_len, output_len, point, max_concurrency, tokens_per_gpu, tokens_per_user,
-tensor_parallel_size, pipeline_parallel_size, max_num_seqs, n_layouts
+tensor_parallel_size, pipeline_parallel_size, max_num_seqs, n_layouts, checkpoint
 ```
+
+`model` is the base model the cell is scored under; `checkpoint` is the checkpoint that produced it
+(the base, or a permitted FP4 expert checkpoint — [§3](#3-models--precision-policy)).
 
 so it conveys exactly what was run, at what concurrency, on which layout. **A complete submission
 covers every cell** — each workload shape at each operating point. A missing cell makes the
@@ -350,6 +403,8 @@ Submit, alongside `scores.csv`:
   platform ([§5.6](#56-when-a-run-fails)); "none" if unchanged.
 - The **container image** identity (vendor + exact vLLM release, e.g. `v0.30.0`) and confirmation that **no fixed
   parameter ([§8.1](#81-fixed-parameters)) was overridden**.
+- If a permitted FP4 expert checkpoint was used: its repository and revision, and its FP4 format
+  ([§3](#3-models--precision-policy)).
 
 Optional supporting evidence (kept under `results/<timestamp>/` for audit, not required for
 scoring): `scores.json`, the plots, the per-cell `summary.json` files, and the `slurm/worker_*`
@@ -428,7 +483,8 @@ Every parameter is **Fixed**, **Operational**, **Tunable**, or **Prohibited**:
 | ⛔ | **Prohibited** | Must not be used. Breaks comparability, introduces numerical asymmetry, or violates the container requirement. |
 
 **Governing principle:** model weights, numerical precision, KV-cache precision, and workload
-shape must be identical across platforms. Every choice that affects only *how quickly* the same
+shape must be identical across platforms — the one exception being the FP4 expert checkpoints of
+[§3](#3-models--precision-policy). Every choice that affects only *how quickly* the same
 computation executes — kernel selection, memory layout, fusion, communication backend, system
 tuning — is tunable.
 
@@ -439,8 +495,8 @@ be overridden:
 
 | Parameter | Required value | Rationale |
 |-----------|---------------|-----------|
-| Model checkpoint | Per [§3](#3-models--precision-policy) | A different checkpoint is a different model. |
-| Weight precision | FP8 / MXFP4 / native FP4+FP8 | No accuracy term in the score; free precision would reward quality loss. |
+| Model checkpoint | `deepseek-ai/DeepSeek-V4-Pro`, or a permitted FP4 expert checkpoint ([§3](#3-models--precision-policy)) | A different checkpoint is a different model. |
+| Weight and activation precision | The base checkpoint's, except FP4 in the experts ([§3](#3-models--precision-policy)) | No accuracy term in the score; free precision would reward quality loss. |
 | `--kv-cache-dtype` | `fp8` | FP8 KV cache trades accuracy for capacity; fixed symmetrically. |
 | `--max-model-len` | `9216` | All datasets fit within this budget. |
 | `--max-num-batched-tokens` | `9216` | Any full-length prompt prefills in one pass; equal scheduling across platforms. |
@@ -517,12 +573,12 @@ layout; the generator refuses a configuration that leaves one uncovered.
 | Parameter / method | Reason |
 |--------------------|--------|
 | A base image not from the official [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) org, or installing any model-execution package beyond the harness image's own deps | Reproducibility requires an official vLLM image at the pinned version. |
-| Alternative checkpoint or precision for any model | A different checkpoint/precision is a different model. Includes `amd/gpt-oss-120b-w-mxfp4-a-fp8` and any FP4 Llama variant. |
+| Any checkpoint other than the base or a permitted FP4 expert checkpoint ([§3](#3-models--precision-policy)) | A different checkpoint/precision is a different model. |
 | Modifying or regenerating dataset files | Frozen inputs ([§4](#4-workloads--datasets)). |
 | `--enable-prefix-caching` | Skips computation on repeated prefixes; inflates throughput. |
 | `--speculative-config` (EAGLE, MTP, n-gram) | Acceptance rates are hardware-speed-dependent, making token throughput non-comparable. |
 | `--performance-mode` | Opaque meta-flag that sets different parameters per platform; not auditable. |
-| Additional weight or activation quantisation | Equivalent to running a different precision. |
+| Weight or activation quantisation beyond [§3](#3-models--precision-policy) (outside the experts, below FP4, or at run time without a permitted checkpoint) | Equivalent to running a different precision. |
 
 ---
 
@@ -531,8 +587,9 @@ layout; the generator refuses a configuration that leaves one uncovered.
 The principle of [§8](#8-rules) governs: a change affecting only execution speed is tunable; one
 altering the computation or workload shape is prohibited.
 
-1. **Lower-precision weights for a fixed-precision model** — prohibited (precision is fixed to
-   prevent undetectable quality loss).
+1. **Lower-precision weights or activations** — prohibited (precision is fixed to prevent
+   undetectable quality loss), except FP4 in the experts through a permitted FP4 expert checkpoint
+   ([§3](#3-models--precision-policy)).
 2. **Prefix caching on the random-token datasets** — prohibited regardless of shared prefixes;
    the parameter is fixed off.
 3. **Truncating output to inflate throughput** — impossible; `--ignore-eos` forces generation to
@@ -568,7 +625,7 @@ Condensed classification of all evaluated parameters. This document governs in a
 
 | Parameter | Category | Notes |
 |-----------|:--------:|-------|
-| Model checkpoint / weight precision | 🔒 | Fixed per model ([§3](#3-models--precision-policy)). |
+| Model checkpoint / weight and activation precision | 🔒 | Fixed, except a permitted FP4 expert checkpoint ([§3](#3-models--precision-policy)). |
 | `--kv-cache-dtype fp8` | 🔒 | Fixed; symmetric across platforms. |
 | `--max-model-len`, `--max-num-batched-tokens` | 🔒 | Fixed at `9216`. |
 | `--enable-chunked-prefill`, `--no-enable-prefix-caching` | 🔒 | Fixed. |

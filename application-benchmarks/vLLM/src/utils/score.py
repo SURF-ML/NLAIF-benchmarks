@@ -74,6 +74,13 @@ def _output_len(record: dict) -> int | None:
 
 
 def _model(record: dict) -> str:
+    # A permitted FP4 expert checkpoint (README §3) scores as its base model, so its cells stay
+    # comparable with base-checkpoint results; the checkpoint itself is reported separately.
+    return (record.get("_base_model") or record.get("model") or record.get("model_id")
+            or "?")
+
+
+def _checkpoint(record: dict) -> str:
     return record.get("model") or record.get("model_id") or "?"
 
 
@@ -138,6 +145,7 @@ def compute_scores(output_dir: Path) -> list[dict]:
             "pipeline_parallel_size": _int_or_none(best, ["pipeline-parallel-size"]),
             "max_num_seqs": _int_or_none(best, ["max_num_seqs"]),
             "n_layouts": int(len(group)),
+            "checkpoint": _checkpoint(best),
         })
 
     rows.sort(key=lambda r: (r["model"], r["input_len"] or 0, r["output_len"] or 0,
@@ -193,7 +201,7 @@ def write_files(rows: list[dict], output_dir: Path) -> tuple[Path, Path]:
     """Write scores.csv and scores.json (with per-point + overall aggregates)."""
     fieldnames = ["model", "input_len", "output_len", "point", "max_concurrency",
                   "tokens_per_gpu", "tokens_per_user", "tensor_parallel_size",
-                  "pipeline_parallel_size", "max_num_seqs", "n_layouts"]
+                  "pipeline_parallel_size", "max_num_seqs", "n_layouts", "checkpoint"]
 
     csv_path = output_dir / "scores.csv"
     with csv_path.open("w", newline="") as f:

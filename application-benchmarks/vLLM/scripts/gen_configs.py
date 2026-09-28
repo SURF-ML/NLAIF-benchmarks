@@ -170,6 +170,8 @@ MODELS = {
 
 # Cluster-specific overrides (per-platform: GPU count/memory, N, and any compilation tunables).
 # `extra` here is *merged into* the model's base extra; other keys replace.
+# A cluster may set `"model"` to a permitted FP4 expert checkpoint (README §3), e.g.
+# "nvidia/DeepSeek-V4-Pro-NVFP4"; its cells still score as the base model.
 # A parallels entry may add `"_points": ["high"]` (labels from POINTS) to run that layout at only
 # those operating points — e.g. a layout that cannot win the low cells. Every cell must still be
 # run by at least one layout; generation fails otherwise. An 8-GPU single-node
@@ -206,10 +208,9 @@ CLUSTERS = {
     # AMD MI355X, two nodes (16 GPUs) as one deployment: TP8 within each node, PP2 across them,
     # via Ray, with RCCL over the per-GPU Pollara RDMA NICs (see that cluster's system.sh). EP on
     # and off are both submitted as layouts; score.py pools their cells.
-    # TP16/PP1 is not possible: DeepSeek-V4's shared_experts MLP, split TP16, gives a
-    # per-partition dim (192) not divisible by the FP8 quantization block_k (128).
     "amd/mi355x-2node": {
         "deepseek-v4-pro": {
+            "extra": {"_extra_serve_args": "-cc.max_cudagraph_capture_size=1024"},
             "parallels": [
                 {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024},
                 {"tensor-parallel-size": 8, "pipeline-parallel-size": 2, "max_num_seqs": 1024,
@@ -263,6 +264,13 @@ def write_model(cluster: str, model_key: str, profile: str) -> None:
 
     serve = _serve_entries(spec["model"], spec["extra"], parallels)
     bench = _bench_entries(spec["model"], spec["dataset_prefix"], parallels, points, shapes)
+    # A cluster may serve a permitted FP4 expert checkpoint (README §3) instead of the base
+    # model. `_base_model` tells score.py which model its cells belong to, so they stay
+    # comparable with base-checkpoint results.
+    base_model = MODELS[model_key]["model"]
+    if spec["model"] != base_model:
+        for entry in serve + bench:
+            entry["_base_model"] = base_model
 
     (out_dir / "serve-params.json").write_text(json.dumps(serve, indent=2) + "\n")
     (out_dir / "bench-params.json").write_text(json.dumps(bench, indent=2) + "\n")
