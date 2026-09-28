@@ -57,8 +57,8 @@ DeepSeek-V4's dotted `-cc.*` compilation flags.
 **bench** entry — one operating point × workload shape (dataset on `/dev/shm`). `_point` labels
 the point and `_n` records the N it was derived from, which is what pairs it with its layout:
 ```json
-{"model": "deepseek-ai/DeepSeek-V4-Pro", "_point": "mid", "_n": 32,
- "max_concurrency": 16, "num_prompts": 32,
+{"model": "deepseek-ai/DeepSeek-V4-Pro", "_point": "high", "_n": 32,
+ "max_concurrency": 32, "num_prompts": 64,
  "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl", "custom-output-len": 8192}
 ```
 

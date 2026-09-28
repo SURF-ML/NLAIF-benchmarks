@@ -37,11 +37,11 @@ larger batches raise throughput per GPU but lower throughput per user:
 | **Online** (interactive) | Low latency per user | Memory bandwidth (decode-bound) |
 | **Offline** (batch) | Aggregate throughput | Compute (prefill-bound) |
 
-A benchmark fixed at one operating point can be tuned for that point alone. This benchmark
-therefore sweeps the full concurrency range and scores the **area under the
-throughput-per-GPU vs. throughput-per-user Pareto frontier**, capturing both regimes in a
-single number. The metric increases monotonically with compute (FLOPS/GPU), memory capacity and
-bandwidth per GPU, the number of GPUs in a high-bandwidth domain, and host/interconnect
+A benchmark fixed at a single operating point can be tuned for that point alone. This benchmark
+therefore measures **throughput per GPU at two operating points spanning both regimes**
+([§4](#4-workloads--datasets)) and scores each separately, so a submission tuned for one regime
+cannot score well overall. The measurement increases with compute (FLOPS/GPU), memory capacity
+and bandwidth per GPU, the number of GPUs in a high-bandwidth domain, and host/interconnect
 performance.
 
 ---
@@ -54,52 +54,52 @@ The primary measurement is `total_token_throughput`, as reported by `vllm bench 
 total_token_throughput = (Σ input_tokens + Σ output_tokens) / wall_clock_seconds
 ```
 
-It is normalised to two axes for the Pareto plot:
+It is normalised two ways:
 
-| Axis | Formula | Interpretation |
-|------|---------|----------------|
-| **y — tok/s/GPU** | `total_token_throughput / (TP × PP)` | Hardware efficiency (offline regime) |
-| **x — tok/s/user** | `total_token_throughput / max_concurrency` | Per-user interactivity (online regime) |
+| Quantity | Formula | Interpretation | Role |
+|----------|---------|----------------|------|
+| **tok/s/GPU** | `total_token_throughput / (TP × PP)` | Hardware efficiency | **Scored** |
+| **tok/s/user** | `total_token_throughput × OSL/(ISL+OSL) / max_concurrency` | Per-user interactivity (output tokens a user sees per second) | Reported |
 
-Each run produces one `(x, y)` point for a given `(model, workload shape, parallelism,
-concurrency)`. Sweeping concurrency traces a curve from the high-interactivity corner (low
-concurrency) to the high-efficiency corner (high concurrency).
+**tok/s/GPU is the scored quantity at every operating point.** Dividing by `TP × PP` keeps
+hardware cost in the denominator, so additional GPUs are rewarded only through the larger KV
+cache and lower per-GPU load they buy, not through their raw count.
+
+tok/s/user is recorded alongside for interpretation, but is not scored. It counts only output
+tokens (ISL and OSL are the measured input and output token totals), since those are what a user
+waits on. At a fixed workload shape and concurrency the two are proportional, so scoring both
+would count the same measurement twice; and at the highest operating point, scoring tok/s/user
+would reward a *smaller* KV cache, since it divides by the concurrency the hardware can sustain.
+
+Each run produces one measurement for a given `(workload shape, parallelism layout, operating
+point)`. A **cell** is one `(workload shape, operating point)` pair: each cell takes the best
+measurement across layouts, and every cell is scored independently ([§7](#7-scoring)).
 
 ---
 
 ## 3. Models & Precision Policy
 
-Three models are evaluated, each contributing one-third of the final score:
+One model is evaluated:
 
-| # | Model | Checkpoint | Precision | Architecture |
-|---|-------|------------|-----------|--------------|
-| 1 | **Llama 3.3 70B Instruct** | `nvidia/Llama-3.3-70B-Instruct-FP8` or `amd/Llama-3.3-70B-Instruct-FP8-KV` | FP8 W8A8 | Dense |
-| 2 | **GPT-OSS-120B** | `openai/gpt-oss-120b` | MXFP4 (native) | MoE |
-| 3 | **DeepSeek V4 Pro** | `deepseek-ai/DeepSeek-V4-Pro` | FP4+FP8 mixed (native) | MoE, 1.6T total / 49B active |
+| Model | Checkpoint | Precision | Architecture |
+|-------|------------|-----------|--------------|
+| **DeepSeek V4 Pro** | `deepseek-ai/DeepSeek-V4-Pro` | FP4+FP8 mixed (native) | MoE, 1.6T total / 49B active |
 
-**Precision is fixed per model and may not be substituted.** The score contains no accuracy
-term, so a free choice of precision would reward throughput gained by degrading output quality —
-gaming the metric cannot detect. The three precisions are chosen for broad native hardware
-support:
+**Precision is fixed and may not be substituted.** The score contains no accuracy term, so a free
+choice of precision would reward throughput gained by degrading output quality — gaming the metric
+cannot detect.
 
-- **Llama 70B → FP8 (W8A8).** Natively supported on every current datacentre accelerator and
-  effectively lossless relative to BF16. Two numerically equivalent builds are accepted:
-  `nvidia/Llama-3.3-70B-Instruct-FP8` and `amd/Llama-3.3-70B-Instruct-FP8-KV` (its FP8 KV-cache
-  scales are immaterial — the harness fixes `--kv-cache-dtype fp8` everywhere).
-- **GPT-OSS-120B → MXFP4 native.** The released weights are stored in MXFP4; use the base
-  `openai/gpt-oss-120b` checkpoint. Any other checkpoint such as the `amd/gpt-oss-120b-w-mxfp4-a-fp8` variant (adds FP4
-  activation quantisation) is prohibited — see [§9](#9-edge-case-rulings).
-- **DeepSeek V4 Pro → FP4+FP8 mixed native.** Trained with MoE expert weights in FP4 and
-  attention/router/normalisation weights in FP8. FP4 encodings differ across vendors (block-16
-  with FP8 scales vs block-32 with power-of-two scales), so a byte-identical checkpoint is not
-  possible — each platform runs its own native FP4 build of the base weights.
+DeepSeek V4 Pro is trained with MoE expert weights in FP4 and attention/router/normalisation
+weights in FP8. FP4 encodings differ across vendors (block-16 with FP8 scales vs block-32 with
+power-of-two scales), so a byte-identical checkpoint is not possible — each platform runs its own
+native FP4 build of the base weights.
 
 ### DeepSeek V4 Pro layout and FP4 accuracy gate
 
 Every platform loads the base `deepseek-ai/DeepSeek-V4-Pro` checkpoint and uses tensor-,
 pipeline-, and expert-parallelism ([§8.4](#84-parallelism)), sized to the model's
 ~1.6T-parameter footprint (≈16 GPUs). Lay it out to match the node's GPU count and memory: a
-single node where enough high-bandwidth GPUs are available, otherwise across nodes (the Snellius
+single node where enough high-bandwidth GPUs are available, or across nodes (the Snellius
 H100 reference serves it as **TP4 × PP4 across four 4-GPU nodes** via Ray).
 
 ---
@@ -108,7 +108,7 @@ H100 reference serves it as **TP4 × PP4 across four 4-GPU nodes** via Ray).
 
 ### Datasets are fixed inputs — download, never regenerate
 
-The benchmark datasets are vLLM `CustomDataset` JSONL files, one set per model. **Download them
+The benchmark datasets are vLLM `CustomDataset` JSONL files. **Download them
 from the organisers:**
 
 > **https://surfdrive.surf.nl/s/MjZ7zQ2ZrZY7nnX**
@@ -123,35 +123,56 @@ Place the files under `datasets/`. The harness copies each one to **`/dev/shm`**
 (local RAM disk, so every worker reads it at memory speed); the bench configs reference the
 `/dev/shm/...` path. The `n1024` / `n32768` / `n131072` filename suffix is the **prompt count** —
 **the same dataset at different sizes** (the larger files extend the smaller ones, so they are
-consistent). Each run needs at least `num_prompts = 2 × max_concurrency` prompts, so pick a size
-that covers your largest concurrency: `n1024` suffices up to `max_concurrency = 512`; extending the
-sweep beyond that ([§4 concurrency](#concurrency-sweep)) requires the larger files.
+prefix-consistent; a given concurrency always selects the same file and therefore the same
+prompts). Each run needs `num_prompts = 2 × max_concurrency`, and
+[`scripts/gen_configs.py`](scripts/gen_configs.py) selects the smallest file that covers it
+automatically — you do not choose a size by hand.
 
 ### Workload shapes
 
-The context window is fixed at **`--max-model-len = 9216`** (8192 + 1024). Three shapes test
-distinct regimes:
+The context window is fixed at **`--max-model-len = 9216`**. Two shapes test opposite regimes:
 
 | Shape | Input tokens | Output tokens | Primary stress |
 |-------|:------------:|:-------------:|----------------|
 | `i8192_o1024` | 8192 | 1024 | Prefill — FLOPS-bound |
 | `i1024_o8192` | 1024 | 8192 | Decode — memory-bandwidth-bound |
-| `i4608_o4608` | 4608 | 4608 | Balanced |
 
-### Concurrency sweep
+Both sum to exactly 9216, so a sequence occupies the same peak KV-cache footprint under either
+shape. That is why a single maximum batch size covers both (below).
 
-`max_concurrency` (client) and `max_num_seqs` (server) are swept jointly. **Values must be
-powers of two.** The required baseline is `{1, 2, 4, …, 512}`. Vendors **may extend the upper
-bound** with additional powers of two (`1024, 2048, …`) to enlarge the search space — useful for
-hardware that sustains higher concurrency before running out of KV-cache memory. Vendors **may
-not** use any non-power-of-two value, and may not drop values below the baseline ceiling reached
-before OOM. To extend the sweep, edit `CONCURRENCY` in
-[`scripts/gen_configs.py`](scripts/gen_configs.py) and regenerate (see [§5](#5-running-the-benchmark)).
+### Operating points
+
+Each shape is run at a small set of fixed operating points, defined relative to **N**, the
+maximum batch size the deployment sustains:
+
+| Point | Concurrency | Regime |
+|-------|-------------|--------|
+| `low` | 1 | Single-stream interactivity |
+| `high` | N | Saturated — peak per-GPU efficiency |
+
+`max_concurrency` (client) is set to the point's value; `max_num_seqs` (server) is set to **N for
+every point**, so one deployment configuration is measured under different load levels and client
+load is the only variable that moves.
+
+The point set is defined once, in `POINTS` in [`scripts/gen_configs.py`](scripts/gen_configs.py). Nothing else in the harness or this document encodes how many points there are.
+
+#### Choosing N
+
+**N is tunable per parallelism layout** and declared by the vendor in `serve-params.json` (see
+[§8.4](#84-parallelism)). It is not a free scoring lever: tok/s/GPU at the `high` point rises with
+N while throughput still scales, and *falls* once N exceeds what the KV cache holds and vLLM
+begins preempting. **Declaring your true maximum is also your best score**, so no harness
+enforcement is needed.
+
+Determine N yourself, by measurement. vLLM's startup line (`Maximum concurrency for 9216 tokens
+per request: …x`) is not an accurate ceiling — for DeepSeek-V4-Pro it understates what fits by
+more than an order of magnitude — so do not take N from it. Because both shapes have identical
+peak KV footprint, **one N covers both**.
 
 The scored configuration space per submission is:
 
 ```
-3 models  ×  3 workload shapes  ×  {prescribed parallelism}  ×  {powers-of-two concurrency}
+1 model  ×  2 workload shapes  ×  {vendor's parallelism layouts}  ×  {operating points}
 ```
 
 ---
@@ -164,18 +185,24 @@ The scored configuration space per submission is:
 |-------------|--------|
 | Job scheduler | **SLURM (required).** One worker job per `(serve, bench)` pair; multi-node serves use `srun` + Ray. The orchestrator may run as a submitted job or locally with `--local` (see §5.5). |
 | Container runtime | Apptainer / Singularity, or Podman. Workers run exclusively inside the official image. |
-| Official base image | Any official vLLM image from [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) — e.g. `vllm/vllm-openai` (CUDA) or `vllm/vllm-openai-rocm` (ROCm) — at the pinned version. Images from any other source are not permitted ([§8.5](#85-prohibited)). |
-| Accelerators | NVIDIA or AMD. Single-node and multi-node (NVIDIA validated; AMD single-node validated, multi-node AMD — see §5.4). |
-| Host Python | ≥ 3.11 (orchestrator only — runs on the host for SLURM access). |
+| Official base image | Any official vLLM image from [`hub.docker.com/r/vllm/`](https://hub.docker.com/r/vllm/) — e.g. `vllm/vllm-openai` (CUDA) or `vllm/vllm-openai-rocm` (ROCm) — at a stable release (see below). Images from any other source are not permitted ([§8.5](#85-prohibited)). |
+| Accelerators | NVIDIA or AMD. Single-node and multi-node (NVIDIA validated; AMD validated single-node and on 2× 8 MI355X — see [§5.4](#54-platform-configuration)). |
+| Host Python | ≥ 3.7 (orchestrator only — runs on the host for SLURM access). |
 | Model cache | A shared `HF_HOME` visible from all nodes. Download weights once before the run. |
 | Datasets | `datasets/*.jsonl` from the organisers ([§4](#4-workloads--datasets)). |
 
-The pinned vLLM version is `VLLM_VERSION` in
-[`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) — currently **`v0.23.0`**.
-Every submission must use this version; a mismatch invalidates the submission. The pin is chosen as
-the newest version that supports the full target-hardware matrix (FP4 / DeepSeek-V4 kernel support
-varies by vendor and version). Bumping it is a global decision by the organisers that invalidates
-prior submissions — do not change it unilaterally.
+**vLLM version.** Use any **stable, tagged vLLM release** (`vX.Y.Z`) that is publicly available
+at acceptance, with its official image. Nightly, release-candidate (`rc`), development and
+self-built-from-source versions are not permitted. Declare the exact version in the submission
+([§6](#6-submitting-results)).
+
+Different submissions may therefore use different releases. That is intended: the benchmark
+evaluates the hardware together with the software ecosystem that drives it ([§1](#1-overview)), and
+engine maturity is part of that ecosystem. It is also material — on MI355X, v0.29.0 to v0.30.0 was
+worth ~13% for this model, and v0.23.0 to v0.29.0 a factor of 5.5 — so choose deliberately.
+
+`VLLM_VERSION` in [`containers/build_vllm_bench.slurm`](containers/build_vllm_bench.slurm) is only
+the default the build script uses; set it to the release you run.
 
 ### 5.2 Building the container
 
@@ -198,8 +225,6 @@ Output: `containers/vllm-bench_<vendor>_<version>.sif` (or `.tar` for Podman). P
 ```bash
 export HF_HOME=/path/to/shared/model-cache   # must be readable on every compute node
 
-huggingface-cli download nvidia/Llama-3.3-70B-Instruct-FP8  # or https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV
-huggingface-cli download openai/gpt-oss-120b
 huggingface-cli download deepseek-ai/DeepSeek-V4-Pro
 ```
 
@@ -212,15 +237,29 @@ Per-cluster settings live in `configs/<cluster>/system.sh`. Copy the reference
 | Variable | Meaning / Snellius H100 reference |
 |----------|-----------------------------------|
 | `GPUS_PER_NODE` | GPUs per node (`4`); serve configs needing more span nodes via Ray |
-| `SBATCH_ARGS` | `-p gpu_h100` (your GPU partition / account / QOS) |
+| `SBATCH_ARGS` | `-p gpu_h100` (your GPU partition / account / QOS) — used for the **worker** jobs |
+| `ORCH_PYTHON` | Host interpreter for the orchestrator (≥ 3.7). Default `python3`; the Snellius reference sets `/usr/bin/python3.11`, since its `python3` is 3.9 |
+| `ORCH_SBATCH_ARGS` | `-p rome` (a **CPU** partition). The orchestrator only submits workers and polls `squeue`, so it requests no GPU. It defaults to `SBATCH_ARGS`, which is a GPU partition — and many schedulers reject a GPU-less job there ("You should request at least one GPU when running a job in a GPU partition"), so set this explicitly. Giving it a GPU instead would idle one for the length of the campaign. |
 | `GPU_REQUEST_TMPL` | GPU-per-node request; `{n}` = per-node count. Default `--gpus-per-node={n}`; use `--gres=gpu:{n}` for gres-based schedulers |
 | `HF_HOME` | shared model cache, readable from every node |
 | `CONTAINER_EXEC` | `apptainer exec --nv --bind /path/to/shared …latest.sif` (NVIDIA) / `--rocm …` (AMD) |
+
+
+
 
 Container-runtime flags and any system-level environment required for correct operation (NIC
 selection on a multi-node fabric, `HSA_*` / RCCL tuning on ROCm, etc.) are platform-specific and
 **permitted** — see [§8.3](#83-tunable-parameters); document any such change in your submission
 ([§6](#6-submitting-results)). The structure of `system.sh` is identical everywhere.
+
+**Single-node AMD.** Set `VLLM_ROCM_USE_AITER=1` in your `system.sh`. DeepSeek-V4-Pro does not
+start on ROCm without it in the releases tested, and the failure is not always self-explanatory:
+
+- **v0.29.0:** `Sparse attention indexer ROCm path is only supported on AITER. Please enable aiter
+  with VLLM_ROCM_USE_AITER=1`
+- **v0.30.0:** `CUDA error: operation not permitted when stream is capturing` — which does not
+  mention AITER and reads like a CUDA-graph problem. Check this variable before debugging graph
+  capture.
 
 **Multi-node AMD.** The multi-node path (Ray over the allocation) is vendor-agnostic — RCCL honours
 the `NCCL_*` env vars and the container runs the official ROCm image unmodified. On ROCm the
@@ -236,7 +275,7 @@ config layout.
 
 ### 5.5 Launching a sweep
 
-One command sweeps every model for a cluster, then plots and scores:
+One command runs the full sweep for a cluster, then plots and scores:
 
 ```bash
 ./run.sh snellius/h100              # submit the orchestrator as a SLURM job
@@ -248,23 +287,29 @@ The orchestrator is a lightweight coordinator (it only `sbatch`es and polls work
 either as a submitted job (default) or directly in your shell with `--local` — handy on a login or
 interactive node outside an allocation. The GPU **workers** are always SLURM jobs.
 
+As a submitted job it goes to `ORCH_SBATCH_ARGS` ([§5.4](#54-platform-configuration)), which must
+name a **CPU** partition — it requests no GPU, and a GPU partition will usually refuse it. Prefer
+this over `--local` for a real campaign: with `--local` the orchestrator must survive as long as the
+run does, and if your shell dies the workers keep going.
+
 `<cluster>` selects `configs/<cluster>/`. Override `HF_HOME`, `SBATCH_ARGS`, `CONTAINER_EXEC`,
 etc. via the environment. [`run.sh`](run.sh) submits the orchestrator
 [`scripts/vllm_sweep_parallel.sh`](scripts/vllm_sweep_parallel.sh), which runs
 [`src/sweep_parallel.py`](src/sweep_parallel.py) to:
 
-1. Merge each model's serve/bench params and cross-join them by `--link-vars`
-   (`max_num_seqs=max_concurrency, model=model`).
-2. Submit one worker **per serve config**, carrying its matched bench shapes; GPUs per job =
-   `TP × PP`. A config needing more GPUs than one node holds is served across nodes via a Ray
-   cluster the worker starts with `srun` (this is how DeepSeek-V4-Pro spans 4 nodes on H100).
-3. Each worker copies its datasets to `/dev/shm`, starts `vllm serve` once, runs all its bench
-   shapes sequentially, and writes `summary.json`.
+1. Merge the serve/bench params and pair them by `--link-vars` (`model=model, max_num_seqs=_n`),
+   so each layout is matched only with the operating points derived from *its own* N.
+2. Submit **one worker per (layout, shape, operating point)** — one SLURM job per measurement.
+   GPUs per job = `TP × PP`. A layout needing more GPUs than one node holds is served across
+   nodes via a Ray cluster the worker starts with `srun` (this is how DeepSeek-V4-Pro spans four
+   4-GPU nodes on the H100 reference).
+3. Each worker copies its dataset to `/dev/shm`, starts `vllm serve`, runs its single
+   measurement, and writes `summary.json`.
 4. Poll SLURM until all workers finish, then generate the Pareto plots and score files.
 
 A worker whose engine dies or wedges (e.g. an out-of-memory crash at high concurrency) aborts
-itself promptly and releases its nodes — it does **not** hang to walltime — and the shapes that did
-complete keep their results. Such a configuration simply contributes fewer points to the frontier.
+itself promptly and releases its nodes — it does **not** hang to walltime. That cell then has no
+result and must be re-run ([§6](#6-submitting-results)).
 
 ### 5.6 When a run fails
 
@@ -286,20 +331,29 @@ around the harness:
 
 ## 6. Submitting Results
 
-The deliverable is **`scores.csv`** — the file `run.sh` writes at the end of a sweep. It is
-self-describing: one row per subtask with `model, input_len, output_len, auc, n_points,
-n_frontier`, so it conveys exactly which models and shapes were run and their scores. A complete
-submission covers all three models × three shapes.
+The deliverable is **`scores.csv`** — the file `run.sh` writes at the end of a run. It is
+self-describing: one row per cell with
+
+```
+model, input_len, output_len, point, max_concurrency, tokens_per_gpu, tokens_per_user,
+tensor_parallel_size, pipeline_parallel_size, max_num_seqs, n_layouts
+```
+
+so it conveys exactly what was run, at what concurrency, on which layout. **A complete submission
+covers every cell** — each workload shape at each operating point. A missing cell makes the
+submission incomplete rather than low-scoring, so re-run any cell that failed.
 
 Submit, alongside `scores.csv`:
+- Each layout's **`serve.log`**, the engine's own record of how each layout was started and
+  what it reported ([§4](#4-workloads--datasets)).
 - A **deviations note** — any system/operational flag you changed to make the suite run on your
   platform ([§5.6](#56-when-a-run-fails)); "none" if unchanged.
-- The **container image** identity (vendor + pinned version) and confirmation that **no fixed
+- The **container image** identity (vendor + exact vLLM release, e.g. `v0.30.0`) and confirmation that **no fixed
   parameter ([§8.1](#81-fixed-parameters)) was overridden**.
 
 Optional supporting evidence (kept under `results/<timestamp>/` for audit, not required for
-scoring): `scores.json`, the `pareto/PARETO-*.png` plots, the per-config `summary.json` files, and
-the `slurm/worker_*` logs. Re-plot or re-score an existing run without re-benchmarking:
+scoring): `scores.json`, the plots, the per-cell `summary.json` files, and the `slurm/worker_*`
+logs. Re-plot or re-score an existing run without re-benchmarking:
 
 ```bash
 RESULTS=results/<timestamp>
@@ -313,58 +367,52 @@ $EXEC python3 src/utils/score.py "$RESULTS"
 ## 7. Scoring
 
 The final score is in **(0, 1]**, where **1.0** is the best result observed across all
-submissions for a given component.
+submissions for a given cell.
 
-### Step 1 — Pareto AUC per (model, shape)
+### Step 1 — tok/s/GPU per cell
 
-For each `(model, shape)`, all swept `(x, y)` points are collected, the **Pareto frontier**
-(upper-right envelope: points not dominated on both axes) is extracted, and the **area under the
-staircase frontier** from `x = 0` is computed:
+A **cell** is one (workload shape, operating point) pair. For each cell, the submission's score is
+the **best tok/s/GPU achieved across every parallelism layout that was run**:
 
 ```
-AUC = Σᵢ (xᵢ − xᵢ₋₁) · yᵢ      [frontier points sorted by x ascending]
+cell(party, shape, point) = max over layouts of  tokens_per_gpu
 ```
 
-A high AUC requires strong performance at **both** ends of the curve — high per-user
-interactivity *and* high per-GPU efficiency — so a submission tuned for one regime cannot score
-well. This is implemented in [`src/utils/plot_pareto.py`](src/utils/plot_pareto.py);
-[`src/utils/score.py`](src/utils/score.py) emits the per-`(model, shape)` AUC to `scores.csv` /
-`scores.json`.
+Taking the maximum *is* the pooling across layouts: a submission may run several layouts and each
+cell is credited with its best result. Note that this is an envelope — different cells may be won
+by different layouts, so the reported values need not all come from one configuration.
 
-**Example — GPT-OSS-120B, Snellius H100:**
-
-![Example Pareto plot — GPT-OSS-120B](docs/example-pareto-gpt-oss-120b.png)
-
-Each curve is one workload shape; markers are the swept concurrency points (`{1…512}` here) and the
-staircase is the Pareto frontier whose area is the AUC. The corresponding `scores.csv` rows:
-
-| model | input_len | output_len | auc |
-|-------|:---------:|:----------:|----:|
-| openai/gpt-oss-120b | 8192 | 1024 | 7,504,158 |
-| openai/gpt-oss-120b | 4608 | 4608 | 814,069 |
-| openai/gpt-oss-120b | 1024 | 8192 | 327,291 |
+This is computed by [`src/utils/score.py`](src/utils/score.py), which writes the raw values to
+`scores.csv` / `scores.json`. The plots from [`src/utils/plot_pareto.py`](src/utils/plot_pareto.py)
+are a visual sanity check only and play no part in the score.
 
 ### Step 2 — Normalisation across submissions
 
-For each `(model, shape)`, each submission's AUC is divided by the best AUC achieved on that same
-`(model, shape)`:
+For each cell, each submission's value is divided by the best value achieved on that same cell:
 
 ```
-norm(party, model, shape) = AUC(party, model, shape) / max_p AUC(p, model, shape)   ∈ (0, 1]
+norm(party, shape, point) = cell(party, shape, point) / max_p cell(p, shape, point)   ∈ (0, 1]
 ```
 
-Only like-for-like curves are compared.
+Only like-for-like measurements are compared: the same shape at the same operating point.
+
+**Normalisation happens per cell, before any averaging.** The prefill-bound shape's raw throughput
+is roughly an order of magnitude above the decode-bound shape's, so averaging raw values would let
+one shape drown out the other entirely.
 
 ### Step 3 — Aggregation
 
 ```
-model_score(party, model) = mean_shape  norm(party, model, shape)
-final_score(party)        = (1/3) · Σ_model  model_score(party, model)
+final_score(party) = mean over all cells of  norm(party, shape, point)
 ```
 
-Each model contributes one-third; within a model, each shape contributes equally. Steps 2–3 are
-performed by the organisers across all submissions — the flat `scores.csv` schema is designed to
-be concatenated across runs for exactly this.
+Every cell contributes equally. Equivalently — and this is how results are usually presented — the
+per-point scores are the mean of that point's shapes, and the final score is the mean of the
+per-point scores.
+
+Steps 2 and 3 are performed by the organisers across all submissions; `scores.csv` deliberately
+contains **raw** values, in a flat schema designed to be concatenated across submissions for
+exactly this purpose.
 
 ---
 
@@ -402,7 +450,8 @@ be overridden:
 | `--request-rate` | `inf` | Open-loop: the concurrency ceiling governs load, not an arrival rate. |
 | `--ignore-eos` | enabled | Forces generation to the prescribed output length. |
 | `--percentile-metrics` | `ttft,tpot,itl,e2el` | Uniform recorded metric set. |
-| `max_concurrency` / `max_num_seqs` | powers of two; baseline `{1…512}` | Defines the swept curve and the per-user normaliser. Upper bound extensible ([§4](#4-workloads--datasets)). |
+| Operating points | `POINTS` in [`scripts/gen_configs.py`](scripts/gen_configs.py) | The set of points, and each point's position relative to N, is fixed. N itself is tunable ([§8.4](#84-parallelism)). |
+| `max_concurrency` | The point's value | Defines the load level being measured. |
 | Dataset files | `datasets/*.jsonl` | Frozen inputs ([§4](#4-workloads--datasets)). |
 
 ### 8.2 Operational parameters
@@ -440,8 +489,15 @@ being evaluated alongside the hardware.
 
 The parallelism **layout is tunable**: each vendor sizes it to their hardware (GPU count and memory
 per GPU). `TP × PP` is the tok/s/GPU denominator, so additional GPUs are rewarded only through the
-larger KV cache and lower per-GPU FLOPS they provide. The shipped `serve-params.json` carry the
+larger KV cache and lower per-GPU load they provide. The shipped `serve-params.json` carry the
 Snellius H100 reference's choices; adjust them for your platform.
+
+**Any number of layouts may be submitted — there is no limit.** Test whatever layouts of the model
+your hardware supports. Add entries to the model's `parallels` list in
+[`scripts/gen_configs.py`](scripts/gen_configs.py) and regenerate; each layout carries its own N,
+is run at its own operating points, and each cell is credited with the best layout's result
+([§7](#7-scoring)). Because `TP × PP` is the tok/s/GPU denominator, a layout that spends more GPUs
+has to earn them back through throughput, so there is nothing to bound.
 
 | Parameter | Rule |
 |-----------|------|
@@ -449,6 +505,7 @@ Snellius H100 reference's choices; adjust them for your platform.
 | `--pipeline-parallel-size` | Tunable — combine with TP to fit the model across your GPUs/nodes. Counts toward the denominator. |
 | `--enable-expert-parallel` | Tunable; typically required for the MoE models. Must work within the official container. |
 | `--data-parallel-size` | Outside the swept configuration — GPU scaling uses TP and PP only, kept this way to bound the search space. |
+| `max_num_seqs` (**N**) | Tunable, **one per layout**. It is the maximum batch size the deployment sustains, and is set on the server for every operating point. See [§4](#4-workloads--datasets) for how to choose it; it is self-policing, so declare your true maximum. |
 
 ### 8.5 Prohibited
 
@@ -478,9 +535,22 @@ altering the computation or workload shape is prohibited.
 4. **Speculative decoding** — prohibited; see [§8.5](#85-prohibited).
 5. **Installing extra packages or custom kernels** — prohibited; only what ships in the official
    image at the pinned version may be used.
-6. **Optimising for a single concurrency value** — the score is the area under the whole frontier;
-   one point cannot disproportionately inflate the AUC.
-7. **A different vLLM version than the pinned one** — invalid; all submissions use the same version.
+6. **Optimising for a single operating point** — pointless; every cell is scored and normalised
+   separately ([§7](#7-scoring)), so a submission strong at one point and weak at another cannot
+   average well.
+7. **Declaring an N beyond what the KV cache holds** — permitted, and self-defeating. vLLM
+   preempts and recomputes rather than failing, so throughput falls and the score falls with it.
+   There is no guard because none is needed; `serve.log` shows the reported capacity either way.
+8. **Declaring an N well below the reported capacity** — permitted, and equally self-defeating:
+   it leaves throughput unclaimed at the `high` point. A large gap usually indicates a
+   misconfiguration.
+9. **Submitting several parallelism layouts** — permitted, with no limit on how many
+   ([§8.4](#84-parallelism)); each cell takes the best. The reported cells are an envelope and need
+   not all come from one layout, so a submission is not required to be a single deployable
+   configuration.
+10. **A vLLM version other than a stable release available at acceptance** — invalid. Nightly,
+    release-candidate and development builds are not permitted. Different submissions may use
+    different stable releases; the version used must be declared ([§6](#6-submitting-results)).
 
 Configurations not addressed here are **prohibited by default**. Contact the organisers before
 proceeding with anything not explicitly sanctioned.
@@ -498,7 +568,7 @@ Condensed classification of all evaluated parameters. This document governs in a
 | `--max-model-len`, `--max-num-batched-tokens` | 🔒 | Fixed at `9216`. |
 | `--enable-chunked-prefill`, `--no-enable-prefix-caching` | 🔒 | Fixed. |
 | `--skip-chat-template`, `--request-rate inf`, `--ignore-eos`, `--percentile-metrics` | 🔒 | Fixed bench parameters. |
-| `max_concurrency` / `max_num_seqs` | 🔒 | Powers of two; baseline `{1…512}`, upper bound extensible. |
+| Operating points, `max_concurrency` | 🔒 | The point set and each point's position relative to N are fixed ([§4](#4-workloads--datasets)). |
 | `--download-dir`, `--safetensors-load-strategy`, `--api-server-count` | ⚙️ | Operational; harness mechanics. |
 | `--backend`, `--dataset-name`, `--save-result`, `--ready-check-timeout-sec`, `--num-prompts` | ⚙️ | Operational bench mechanics. |
 | `--trust-remote-code` / `--tokenizer-mode` (DeepSeek-V4) | ⚙️ | Operational model-load requirements. |
@@ -510,6 +580,7 @@ Condensed classification of all evaluated parameters. This document governs in a
 | `--block-size` | ✅ | Memory layout only. |
 | `--enable-expert-parallel` | ✅ | Tunable; identical both sides; official image only. |
 | System / network environment (`NCCL_SOCKET_IFNAME`, runtime flags, …) | ✅ | Required for correct operation; affects speed, not results. |
+| `VLLM_ROCM_USE_AITER=1` | ✅ | ROCm only. Required for DeepSeek-V4 in the releases tested (v0.29.0, v0.30.0). Selects kernels inside the official image; installs nothing. |
 | `--data-parallel-size` | — | Outside the swept configuration (scale with TP/PP). |
 | `--speculative-config` | ⛔ | Hardware-speed-dependent acceptance rate. |
 | `--performance-mode` | ⛔ | Sets different parameters per platform; not auditable. |

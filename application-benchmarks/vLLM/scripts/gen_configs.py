@@ -45,7 +45,6 @@ SHAPES = [(1024, 8192), (8192, 1024)]
 # that those two stay in sync, and that nothing else encodes the count.
 POINTS = [
     {"label": "low",  "abs":  1},
-    {"label": "mid",  "frac": 0.5},
     {"label": "high", "frac": 1.0},
 ]
 
@@ -101,7 +100,7 @@ def _bench_entries(model: str, dataset_prefix: str, parallels: list[dict],
         for point in points:
             concurrency = _resolve_point(point, n)
             if concurrency in seen:
-                # e.g. N=2 puts the N/2 point on top of the absolute-1 point: keep the first.
+                # e.g. N=1 puts the N point on top of the absolute-1 point: keep the first.
                 print(f"    note: point '{point['label']}' collapses onto concurrency "
                       f"{concurrency} at N={n} — skipping the duplicate")
                 continue

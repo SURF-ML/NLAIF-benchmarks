@@ -19,24 +19,6 @@
   },
   {
     "model": "deepseek-ai/DeepSeek-V4-Pro",
-    "_point": "mid",
-    "_n": 1024,
-    "max_concurrency": 512,
-    "num_prompts": 1024,
-    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
-    "custom-output-len": 8192
-  },
-  {
-    "model": "deepseek-ai/DeepSeek-V4-Pro",
-    "_point": "mid",
-    "_n": 1024,
-    "max_concurrency": 512,
-    "num_prompts": 1024,
-    "dataset-path": "/dev/shm/dsv4_i8192_o1024_n1024.jsonl",
-    "custom-output-len": 1024
-  },
-  {
-    "model": "deepseek-ai/DeepSeek-V4-Pro",
     "_point": "high",
     "_n": 1024,
     "max_concurrency": 1024,
