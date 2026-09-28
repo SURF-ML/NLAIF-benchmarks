@@ -348,17 +348,20 @@ etc. via the environment. [`run.sh`](run.sh) submits the orchestrator
 
 1. Merge the serve/bench params and pair them by `--link-vars` (`model=model, max_num_seqs=_n`),
    so each layout is matched only with the operating points derived from *its own* N.
-2. Submit **one worker per (layout, shape, operating point)** — one SLURM job per measurement.
+2. Submit **one worker per layout** — one SLURM job that runs all of that layout's measurements.
    GPUs per job = `TP × PP`. A layout needing more GPUs than one node holds is served across
    nodes via a Ray cluster the worker starts with `srun` (this is how DeepSeek-V4-Pro spans four
    4-GPU nodes on the H100 reference).
-3. Each worker copies its dataset to `/dev/shm`, starts `vllm serve`, runs its single
-   measurement, and writes `summary.json`.
+3. Each worker copies its datasets to `/dev/shm`, starts `vllm serve` once, runs the layout's
+   measurements in ascending concurrency (`low` before `high`), and writes a `summary.json` per
+   cell.
 4. Poll SLURM until all workers finish, then generate the Pareto plots and score files.
 
 A worker whose engine dies or wedges (e.g. an out-of-memory crash at high concurrency) aborts
-itself promptly and releases its nodes — it does **not** hang to walltime. That cell then has no
-result and must be re-run ([§6](#6-submitting-results)).
+itself promptly and releases its nodes — it does **not** hang to walltime. The cells it had
+already finished keep their results; the failed cell and any after it have none and must be
+re-run ([§6](#6-submitting-results)). Running `high` last means a crash there costs only the
+`high` cells.
 
 ### 5.6 When a run fails
 

@@ -11,10 +11,10 @@ Two modes
 ---------
 Orchestrator (default):
     Reads serve/bench params, applies link-vars pairing, then submits one
-    `sbatch` job per (serve, bench) pair (each as a worker). Polls squeue for status.
+    `sbatch` job per serve config (layout), carrying all its linked benches. Polls squeue.
 
 Worker (--worker flag, launched by sbatch):
-    Starts one `vllm serve`, runs its bench config against it, merges serve+bench
+    Starts one `vllm serve`, runs its bench configs against it in order, merges serve+bench
     params into the result record, writes summary.json, then stops the server.
     The server's own stdout/stderr is captured to serve.log next to the results.
 
@@ -611,8 +611,8 @@ def run_worker(args):
 def _submit_group(i, serve_config, bench_configs, port, n, tmp_root, results_dir, args) -> str:
     """Write config files, submit an sbatch job, return SLURM job ID.
 
-    `bench_configs` holds exactly one bench: the orchestrator pairs each serve config with
-    each linked bench separately so every measurement runs against a freshly started engine.
+    `bench_configs` holds every bench linked to this serve config (layout), in ascending
+    concurrency: the worker starts the engine once and runs them in that order.
     """
     serve_file = tmp_root / f"serve_{i}.json"
     bench_file = tmp_root / f"bench_{i}.json"
@@ -669,7 +669,7 @@ def _submit_group(i, serve_config, bench_configs, port, n, tmp_root, results_dir
         ["--nodes=1", "--ntasks=1", *gpu_req] if not multinode
         else [f"--nodes={nodes}", "--ntasks-per-node=1", *gpu_req]
     )
-    worker_time = args.worker_time or ("12:00:00" if multinode else "04:00:00")
+    worker_time = args.worker_time or ("12:00:00" if multinode else "08:00:00")
 
     sbatch_cmd = [
         "sbatch", "--parsable", f"--time={worker_time}",
@@ -763,23 +763,23 @@ def run_orchestrator(args):
     bench_params = _load_params(args.config_root, args.bench_params, "bench")
     link_vars = parse_link_vars(args.link_vars)
 
-    # One worker per (serve, bench) PAIR — every measurement gets a freshly started engine.
-    # Sharing a server across benches would be cheaper (one model load instead of several),
-    # but back-to-back runs contaminate each other: allocator fragmentation after a
-    # high-concurrency run, lazy CUDA-graph/kernel warm-up that only the first bench pays,
-    # page-cache warmth, and GPU clock/thermal state all differ between the first and last
-    # bench on one engine. Those effects are ordering-dependent and undetectable afterwards,
-    # so the model load is paid per measurement deliberately. It also bounds the blast radius:
-    # a wedged engine costs one cell, not the rest of the run.
+    # One worker per serve config (layout): one engine start serves all of that layout's cells.
+    # Loading the model dominated a job-per-cell sweep — measured on the Snellius H100 reference
+    # (DeepSeek-V4-Pro, N=32), engine start/stop took 51% of all job time, more than the
+    # measurements themselves. Cells run in ascending concurrency (low before high), so a crash or
+    # OOM at the high point, where they happen, loses only the cells still to run; the worker
+    # aborts the rest of its list when the engine dies.
     groups: list[tuple[dict, list[dict]]] = [
-        (s, [b])
+        (s, sorted((b for b in bench_params
+                    if configs_match(s, b, link_vars) and point_selected(s, b)),
+                   key=lambda b: _get(b, "max_concurrency") or 0))
         for s in serve_params
-        for b in bench_params
-        if configs_match(s, b, link_vars) and point_selected(s, b)
     ]
+    groups = [(s, benches) for s, benches in groups if benches]
 
     print(f"[orchestrator] {len(serve_params)} serve configs / {len(bench_params)} benches "
-          f"→ {len(groups)} sbatch workers (one per measurement)")
+          f"→ {len(groups)} sbatch workers (one per layout, "
+          f"{sum(len(b) for _, b in groups)} measurements)")
 
     results_dir = pathlib.Path(
         args.results_dir or f"results/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -888,9 +888,10 @@ def run_orchestrator(args):
                             absent_counts[i] = absent_counts.get(i, 0) + 1
                             if absent_counts[i] >= 3:
                                 serve_config, bench_configs = groups[i]
-                                subdir = results_dir / combo_subdir(serve_config, bench_configs[0])
-                                status[i]["state"] = ("done" if (subdir / "summary.json").exists()
-                                                       else "FAILED")
+                                status[i]["state"] = ("done" if all(
+                                    (results_dir / combo_subdir(serve_config, b)
+                                     / "summary.json").exists() for b in bench_configs)
+                                    else "FAILED")
                                 status[i]["nodes"] = ""
 
         parts = []
@@ -953,7 +954,7 @@ def main():
                         "GPU count. Default '--gpus-per-node={n}'. Override per cluster for "
                         "gres-based schedulers, e.g. '--gres=gpu:{n}' or '--gres=gpu:mi300:{n}'.")
     p.add_argument("--worker-time", default=None,
-                   help="sbatch --time for worker jobs. Default: 04:00:00 single-node, "
+                   help="sbatch --time for worker jobs. Default: 08:00:00 single-node, "
                         "12:00:00 multi-node.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the worker allocation each group would request; submit nothing.")
