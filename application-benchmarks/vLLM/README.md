@@ -499,6 +499,11 @@ is run at its own operating points, and each cell is credited with the best layo
 ([§7](#7-scoring)). Because `TP × PP` is the tok/s/GPU denominator, a layout that spends more GPUs
 has to earn them back through throughput, so there is nothing to bound.
 
+By default every layout runs every operating point. A layout may instead declare
+`"_points": [...]` (labels from `POINTS`) in its `parallels` entry to run only those points — for
+example a layout that cannot win the `low` cells. Every cell must still be run by at least one
+layout; the generator refuses a configuration that leaves one uncovered.
+
 | Parameter | Rule |
 |-----------|------|
 | `--tensor-parallel-size` | Tunable — choose per your hardware. Counts toward the `TP × PP` denominator. |

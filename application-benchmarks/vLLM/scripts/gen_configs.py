@@ -85,6 +85,12 @@ def _serve_entries(model: str, extra: dict, parallels: list[dict]) -> list[dict]
     return [{"model": model, **extra, **par} for par in parallels]
 
 
+def _layout_points(par: dict, points: list[dict]) -> list[dict]:
+    """The operating points a layout runs: those named in its `_points`, else all of them."""
+    selected = par.get("_points")
+    return points if selected is None else [p for p in points if p["label"] in selected]
+
+
 def _bench_entries(model: str, dataset_prefix: str, parallels: list[dict],
                    points: list[dict], shapes: list[tuple[int, int]]) -> list[dict]:
     """One entry per (distinct N, point, shape).
@@ -92,12 +98,17 @@ def _bench_entries(model: str, dataset_prefix: str, parallels: list[dict],
     Operating points are fractions of N, so a layout's benches are only valid for layouts with
     the same N. Each entry therefore carries `_n`, and the orchestrator links serve to bench on
     `model` *and* `max_num_seqs=_n` — otherwise a TP4 layout would also be benched at a TP8
-    layout's concurrencies. Layouts sharing an N share their bench entries.
+    layout's concurrencies. Layouts sharing an N share their bench entries; a point is generated
+    for an N only if at least one layout with that N runs it (see `_points`).
     """
     out: list[dict] = []
     for n in sorted({par["max_num_seqs"] for par in parallels}):
+        wanted = {p["label"] for par in parallels if par["max_num_seqs"] == n
+                  for p in _layout_points(par, points)}
         seen: set[int] = set()
         for point in points:
+            if point["label"] not in wanted:
+                continue
             concurrency = _resolve_point(point, n)
             if concurrency in seen:
                 # e.g. N=1 puts the N point on top of the absolute-1 point: keep the first.
@@ -158,7 +169,10 @@ MODELS = {
 }
 
 # Cluster-specific overrides (per-platform: GPU count/memory, N, and any compilation tunables).
-# `extra` here is *merged into* the model's base extra; other keys replace. An 8-GPU single-node
+# `extra` here is *merged into* the model's base extra; other keys replace.
+# A parallels entry may add `"_points": ["high"]` (labels from POINTS) to run that layout at only
+# those operating points — e.g. a layout that cannot win the low cells. Every cell must still be
+# run by at least one layout; generation fails otherwise. An 8-GPU single-node
 # DeepSeek layout (TP8) is documented in the README; uncomment the example to author such a config.
 CLUSTERS = {
     "snellius/h100": {           # 4 × 94GiB H100 per node
@@ -228,6 +242,19 @@ def write_model(cluster: str, model_key: str, profile: str) -> None:
             f"max batch size N); missing in {missing}"
         )
 
+    labels = {p["label"] for p in POINTS}
+    for par in parallels:
+        selected = par.get("_points")
+        if selected is not None and (not selected or not set(selected) <= labels):
+            raise ValueError(
+                f"{cluster}/{model_key}: `_points` must be a non-empty list of labels from "
+                f"POINTS {sorted(labels)}; got {selected!r} in {par}"
+            )
+    # A reduced profile may slice away every point a layout selected: that layout is not run.
+    for par in [par for par in parallels if not _layout_points(par, points)]:
+        print(f"    note: no selected point left in profile '{profile}' for {par} — skipping it")
+    parallels = [par for par in parallels if _layout_points(par, points)]
+
     # Non-`full` profiles go to a suffixed cluster dir (e.g. snellius/h100-debug) so the
     # orchestrator's */{serve,bench}-params.json glob sees only the reduced sweep.
     out_cluster = cluster if profile == "full" else f"{cluster}-{profile}"
@@ -239,7 +266,19 @@ def write_model(cluster: str, model_key: str, profile: str) -> None:
 
     (out_dir / "serve-params.json").write_text(json.dumps(serve, indent=2) + "\n")
     (out_dir / "bench-params.json").write_text(json.dumps(bench, indent=2) + "\n")
-    jobs = sum(1 for s in serve for b in bench if s["max_num_seqs"] == b["_n"])
+    # Same pairing rule as the orchestrator: same N, and the bench's point selected by the layout.
+    pairs = [(s, b) for s in serve for b in bench if s["max_num_seqs"] == b["_n"]
+             and ("_points" not in s or b["_point"] in s["_points"])]
+    # Every cell must be run by at least one layout, or the submission is incomplete.
+    covered = {(b["_point"], b["custom-output-len"]) for _, b in pairs}
+    uncovered = [(p["label"], out_len) for p in points for _, out_len in shapes
+                 if (p["label"], out_len) not in covered]
+    if uncovered:
+        raise ValueError(
+            f"{cluster}/{model_key}: no layout runs cell(s) (point, output_len) {uncovered}; "
+            f"widen some layout's `_points`"
+        )
+    jobs = len(pairs)
     print(f"  {out_cluster}/{model_key}: {len(serve)} layout(s), {len(bench)} bench entries "
           f"→ {jobs} jobs")
 

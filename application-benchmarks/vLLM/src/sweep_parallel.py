@@ -77,6 +77,12 @@ def configs_match(serve: dict, bench: dict, link_vars: dict) -> bool:
                for sk, bk in link_vars.items())
 
 
+def point_selected(serve: dict, bench: dict) -> bool:
+    """A layout may restrict itself to some operating points via its `_points` meta-key."""
+    points = serve.get("_points")
+    return points is None or bench.get("_point") in points
+
+
 def n_gpus_for(serve: dict) -> int:
     tp = _get(serve, "tensor-parallel-size") or 1
     pp = _get(serve, "pipeline-parallel-size") or 1
@@ -769,7 +775,7 @@ def run_orchestrator(args):
         (s, [b])
         for s in serve_params
         for b in bench_params
-        if configs_match(s, b, link_vars)
+        if configs_match(s, b, link_vars) and point_selected(s, b)
     ]
 
     print(f"[orchestrator] {len(serve_params)} serve configs / {len(bench_params)} benches "
