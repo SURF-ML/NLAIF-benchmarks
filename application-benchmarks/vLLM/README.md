@@ -126,7 +126,7 @@ all of the following hold:
    the experts runs below the base checkpoint's precision, and the KV cache stays as fixed in
    [§8.1](#81-fixed-parameters).
 5. **Runs in an allowed image.** It loads and runs in an official vLLM image at a stable release
-   ([§5.1](#51-system-requirements)), with no additional packages ([§8.5](#85-prohibited)).
+   ([§5.1](#51-system-requirements)) at acceptance, with no additional packages ([§8.5](#85-prohibited)).
    Whether a given release already executes the FP4 format natively on a given platform is a
    software matter: the checkpoint is permitted either way, and the measured throughput reflects it.
 6. **Disclosed.** The submission names the checkpoint (repository and revision) and its FP4 format
