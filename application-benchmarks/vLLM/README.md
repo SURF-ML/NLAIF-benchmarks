@@ -220,7 +220,7 @@ peak KV footprint, **one N covers both**.
 The scored configuration space per submission is:
 
 ```
-1 model  ×  2 workload shapes  ×  {vendor's parallelism layouts}  ×  {operating points}
+1 model  ×  2 workload shapes  ×  2 concurrency settings
 ```
 
 ---
