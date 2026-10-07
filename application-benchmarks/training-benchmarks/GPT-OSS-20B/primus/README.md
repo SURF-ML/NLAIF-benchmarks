@@ -4,15 +4,15 @@
  Adaption of https://github.com/mlcommons/training/tree/master/small_llm_moe_pretraining/primus on [Snellius](https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660184/Snellius) hardware and software. A part of the reason for this adaption the lack of Pyxis/container support on Snellius, requiring a port to apptainer. See their README for more information.
 
 
-This pre-training benchmark targets single (or two) node (8 GPUs), small input data, small/medium Mixture-of-Experts model (20B) pre-training, using communiciation intensive parallelization strategies (expert parallel). 
+This pre-training benchmark targets single (or two) node (8 GPUs), small input data, small/medium Mixture-of-Experts model (20B) pre-training, using communication intensive parallelization strategies (expert parallel). 
 
-This benchmark follows all the CLOSED division rulesets from the [MLPerf training rules](https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc), as well as some additional rules of our own. In short, this means that the framework and exact implementation of the training script is flexible, as long as the result is mathematically equivalent to the reference implementation beyond the allowed tunable hyperparameters (such as batch size and learning rate). 
+This benchmark follows all the CLOSED division rule-sets from the [MLPerf training rules](https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc), as well as some additional rules of our own. In short, this means that the framework and exact implementation of the training script is flexible, as long as the result is mathematically equivalent to the reference implementation beyond the allowed tunable hyper-parameters (such as batch size and learning rate). 
 
 
 Some modifications on top of the MLPerf rules are made for this benchmark. Specifically:
 - Precision format is restricted to be **at least** 8-bit precision (e.g., FP8/MXFP8). Higher precisions (e.g., BF16/FP16, TF32, FP32, FP64) are still permitted according to the MLPerf rules. 
-- The final score is derived as the *mean* of 10 **consecutive** runs, without discarding the best and worst performing run.
-- Each run is performed using 8 GPUs/accelerators
+- The final score is derived as the ***mean*** of 10 **consecutive** runs, without discarding the best and worst performing run.
+- Each run is performed using exactly 8 GPUs
 - Each run must be on a different subset of nodes on the accelerated partition
 
 For more details on these rules, as well as the scoring mechanism we refer to [`RULES_AND_SCORING.md`](RULES_AND_SCORING.md).
@@ -75,7 +75,7 @@ sudo chmod -R 777 $LOGDIR
 
 ## Choose Configuration
 
-Choose or create appropriate configuration and system-specific hyperparameters based on hardware type:
+Choose or create appropriate configuration and system-specific hyper-parameters based on hardware type:
 
 | Config File | System | GPUs | TP | EP | PP | Precision |
 |-------------|--------|------|----|----|----|-----------|
@@ -150,7 +150,7 @@ Reference:
 | Max Training Iterations | 1,200,000 |
 
 Snellius:
-| Hyperparameter | Value |
+| Hyper-parameter | Value |
 |----------------|-------|
 | Micro Batch Size | 1 |
 | Global Batch Size | 16 |
@@ -184,7 +184,7 @@ gpt-oss-20b/primus/
 ├── run_apptainer.sub               # Apptainer Slurm batch script
 └── requirements.txt                # Python dependencies (includes primus-mllog)
 ```
-# 8. Approximnate runtime
+# 8. Approximate runtime
 Reference (AMD)
 - Reference (8xMi355x single node) Approximate train time to convergence is ~6.5 hours.
 **correction**: From provided RCP logs time to 3.34 loss is ~5.5 hours. 6.5 hours was to 3.2 loss
