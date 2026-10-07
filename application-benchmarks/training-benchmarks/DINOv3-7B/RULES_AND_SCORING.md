@@ -31,7 +31,7 @@ Three runs **consecutive** runs on different node-subsets with different random 
 - **Job Scheduler**: SLURM system required
 - **Attention Implementation**: Default PyTorch SDPA (Scaled Dot Product Attention) must be used. Manual installation of Flash Attention or other attention implementations beyond what PyTorch ships with is **not permitted**
 - **Python Containers**: Permissible (e.g., PyTorch containers/Apptainers), subject to general rules
-- The latest stable version of the software (e.g., PyTorch) available at the time of release of the benchmark suite shall be used, but bugfix releases released after this date may also be used.
+- The latest stable version of the software (e.g., PyTorch) available at the time of acceptance of the system shall be used.
 
 ### 2.3 Code Base
 - **Repository**: [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3) 
