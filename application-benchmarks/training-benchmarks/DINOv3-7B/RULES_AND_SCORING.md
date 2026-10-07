@@ -64,7 +64,6 @@ Three runs **consecutive** runs on different node-subsets with different random 
 | `train.batch_size_per_gpu` | Unrestricted (integer) | 16 | Also controls global batch size (gbs=GPU×batch_size_per_gpu) |
 | `train.num_workers` | Unrestricted (integer) | 10 | Number of dataloader workers |
 | `train.compile` | Unrestricted (True/False) | TRUE | Controls use of torch.compile |
-| `dino.local_crops_number` | Unrestricted (integer) | TRUE | Number of local crops per image |
 | `train.checkpointing_full` | Unrestricted (True/False) | FALSE | Controls the degree of activation checkpointing |
 | `train.optim.epochs` | Unrestricted (integer) | 100 | Total training epochs |
 | `evaluation.eval_period_iterations` | At least every 1.28M samples. So minimum: 1.28M/(`train.batch_size_per_gpu` / 32) | default=2500 (`train.batch_size_per_gpu`=16) | Controls frequency of saving teacher checkpoint for evaluation |
