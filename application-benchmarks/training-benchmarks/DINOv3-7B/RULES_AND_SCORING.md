@@ -49,7 +49,7 @@ Three runs **consecutive** runs on different node-subsets with different random 
 - **Global Crop Size**: 512×512 (upsampled using bicubic interpolation)
 - **Local Crop Size**: 224×224 (upsampled using bicubic interpolation)
 - **Metadata**: Additional metadata required by DINOv3 (generated using `imagenet1k_prep.py`)
-- **Storage**: Dataset should be stored on shared (non-local) scratch storage that is accessible for all nodes. Use of scratch local, ramdisk or similar in-memory storage is **not permitted**
+- **Storage**: Dataset should be stored on shared (non-local) scratch storage that is accessible for all nodes. Use of node-local scratch, ramdisk or similar in-memory storage is **not permitted**
 
 ## 4. Configuration Rules
 
