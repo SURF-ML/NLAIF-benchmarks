@@ -272,10 +272,12 @@ Nodelist pinning must be applied per iteration so that SLURM places each job on 
 
 Sequential and randomized (`--randomize`, adds `-R`) modes are both required for every mdtest rule.
 
-| Rule | Modeled Dataset | Scope | Concurrent | Total Files | Tree (branch × depth) | Files/dir | File Size |
-|------|----------------|-------|:----------:|-------------|----------------------|-----------|-----------|
-| `mdtest-imagenet-21k` | ImageNet-21k — 21,841 classes | HBD | × N | ~14 M | 21,841 × 1 | ~641 | 150 KiB |
-| `mdtest-lvd-1689m-shallow` | LVD-1689M — shallow prefix | System | — | ~1.7 B | 25,000 × 1 | ~67,600 | 300 KiB |
+| Rule | Modeled Dataset | Scope | Concurrent | Total Files | Tree (branch × depth) | Files/dir | File Size | Extra Mode | 
+|------|----------------|-------|:----------:|-------------|----------------------|-----------|-----------| -- |
+| `mdtest-imagenet-21k` | ImageNet-21k — 21,841 classes | HBD | System × 0.25 | ~14 M | 21,841 × 1 | ~641 | 150 KiB | --randomize |
+| `mdtest-imagenet-21k` | ImageNet-21k — 21,841 classes | HBD | System × 0.25 | ~14 M | 21,841 × 1 | ~641 | 150 KiB | |
+| `mdtest-lvd-1689m-shallow` | LVD-1689M — shallow prefix | System | — | ~1.7 B | 25,000 × 1 | ~67,600 | 300 KiB | --randomize |
+| `mdtest-lvd-1689m-shallow` | LVD-1689M — shallow prefix | System | — | ~1.7 B | 25,000 × 1 | ~67,600 | 300 KiB | |
 
 #### Bandwidth (IOR)
 
@@ -283,8 +285,8 @@ Training dataset rules require `--randomize` (`-z`). Checkpoint rules are always
 
 | Rule | Modeled Workload | Scope | Concurrent | Aggregate Size | Transfer Size | Access Pattern |
 |------|-----------------|-------|:----------:|----------------|---------------|----------------|
-| `ior-llama-70b` | LLaMA 2 70B training dataset | HBD | × N | 3,726 GiB | 16 MiB | rand, file-per-process |
-| `ior-llama-70b-checkpoint` | LLaMA 2 70B checkpoint | HBD | × N | 700 GiB | 64 MiB | seq write + read, file-per-process |
+| `ior-llama-70b` | LLaMA 2 70B training dataset | HBD | System x 0.25 | 3,726 GiB | 16 MiB | rand, file-per-process |
+| `ior-llama-70b-checkpoint` | LLaMA 2 70B checkpoint | HBD | System × 0.25 | 700 GiB | 64 MiB | seq write + read, file-per-process |
 | `ior-llama-405b` | LLaMA 3.1 405B training dataset | System | — | 27,940 GiB | 32 MiB | rand, file-per-process |
 | `ior-llama-405b-checkpoint` | LLaMA 3.1 405B checkpoint | System | — | 4,050 GiB | 64 MiB | seq write + read, file-per-process |
 | `ior-scientific` | ERA5 climate reanalysis (one epoch) | System | — | 54 TiB | 4 MiB | rand, shared file |
