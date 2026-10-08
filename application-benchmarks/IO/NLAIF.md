@@ -285,10 +285,10 @@ Training dataset rules require `--randomize` (`-z`). Checkpoint rules are always
 
 | Rule | Modeled Workload | Scope | Concurrent | Aggregate Size | Transfer Size | Access Pattern |
 |------|-----------------|-------|:----------:|----------------|---------------|----------------|
-| `ior-llama-70b` | LLaMA 2 70B training dataset | HBD | System x 0.25 | 3,726 GiB | 16 MiB | rand, file-per-process |
+| `ior-llama-70b` | LLaMA 2 70B training dataset | HBD | System x 0.25 | 3 726 GiB | 16 MiB | rand, file-per-process |
 | `ior-llama-70b-checkpoint` | LLaMA 2 70B checkpoint | HBD | System × 0.25 | 700 GiB | 64 MiB | seq write + read, file-per-process |
-| `ior-llama-405b` | LLaMA 3.1 405B training dataset | System | — | 27,940 GiB | 32 MiB | rand, file-per-process |
-| `ior-llama-405b-checkpoint` | LLaMA 3.1 405B checkpoint | System | — | 4,050 GiB | 64 MiB | seq write + read, file-per-process |
+| `ior-llama-405b` | LLaMA 3.1 405B training dataset | System | — | 27 940 GiB | 32 MiB | rand, file-per-process |
+| `ior-llama-405b-checkpoint` | LLaMA 3.1 405B checkpoint | System | — | 4 050 GiB | 64 MiB | seq write + read, file-per-process |
 | `ior-scientific` | ERA5 climate reanalysis (one epoch) | System | — | 54 TiB | 4 MiB | rand, shared file |
 
 ---
