@@ -1,0 +1,4 @@
+[submodule "application-benchmarks/training-benchmarks/DINOv3-7B/dinov3_src"]
+	path = application-benchmarks/training-benchmarks/DINOv3-7B/dinov3_src
+	url = https://github.com/LVeefkind/dinov3.git
+	branch = patch-1
