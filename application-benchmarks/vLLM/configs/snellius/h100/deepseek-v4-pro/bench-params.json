@@ -1,0 +1,38 @@
+[
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "low",
+    "_n": 32,
+    "max_concurrency": 1,
+    "num_prompts": 2,
+    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
+    "custom-output-len": 8192
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "low",
+    "_n": 32,
+    "max_concurrency": 1,
+    "num_prompts": 2,
+    "dataset-path": "/dev/shm/dsv4_i8192_o1024_n1024.jsonl",
+    "custom-output-len": 1024
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "high",
+    "_n": 32,
+    "max_concurrency": 32,
+    "num_prompts": 64,
+    "dataset-path": "/dev/shm/dsv4_i1024_o8192_n1024.jsonl",
+    "custom-output-len": 8192
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "_point": "high",
+    "_n": 32,
+    "max_concurrency": 32,
+    "num_prompts": 64,
+    "dataset-path": "/dev/shm/dsv4_i8192_o1024_n1024.jsonl",
+    "custom-output-len": 1024
+  }
+]

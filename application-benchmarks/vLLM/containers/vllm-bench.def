@@ -1,0 +1,40 @@
+Bootstrap: docker
+From: vllm/vllm-openai:v0.23.0
+
+
+%post
+    # Install vllm bench dependencies, plus Ray for multi-node (TP×PP) serving.
+    # vllm/vllm-openai does not bundle Ray; the v1 Ray executor needs ray[cgraph]>=2.43.0
+    # (Ray Compiled Graph) — see vllm/v1/executor/ray_executor.py:_check_ray_cgraph_installation.
+    pip install --root-user-action=ignore vllm[bench] "ray[cgraph]>=2.43.0"
+    # ray[cgraph] installs a CuPy wheel; on CUDA it must match the image's toolkit major version
+    # (suffix-less v0.22.x/v0.23.x images are CUDA 13 → cupy-cuda13x; the -cu129 images are
+    # CUDA 12.9 → cupy-cuda12x). Different-CUDA CuPy wheels unpack into the same cupy/ package
+    # dir and corrupt each other (cupy.cuda goes missing), so remove any CuPy first, then
+    # install exactly the one matching torch's CUDA major so a single consistent CuPy remains.
+    #
+    # This is CUDA-only. On the ROCm base image torch.version.cuda is None (it's torch.version.hip
+    # instead) and the cupy-cudaNx wheels don't apply, so the whole step is skipped — the recipe
+    # detects the platform from torch rather than a build arg, so it stays self-contained and the
+    # same def builds cleanly for both vendors. (A single-node ROCm TP8 deployment doesn't
+    # exercise Ray's CuPy-based compiled-graph comms anyway.)
+    CUDA_MAJOR=$(python3 -c "import torch,re; v=torch.version.cuda; print(re.match(r'(\d+)', v).group(1) if v else '')")
+    if [ -n "$CUDA_MAJOR" ]; then
+        pip uninstall --root-user-action=ignore -y cupy-cuda12x cupy-cuda13x || true
+        pip install --root-user-action=ignore --no-cache-dir "cupy-cuda${CUDA_MAJOR}x"
+    else
+        echo "Non-CUDA (ROCm) base image detected — skipping CuPy install."
+    fi
+    cat >> /etc/bashrc <<EOF
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias l.='ls -d .* --color=auto'
+EOF
+
+
+%environment
+    export LC_ALL=C
+    export LD_PRELOAD=
+
+%runscript
+    exec "$@"
